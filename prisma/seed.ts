@@ -400,7 +400,7 @@ async function main() {
 
   const customers = [];
   for (let i = 1; i <= 12; i++) {
-    const company = companies[i - 1];
+    const company = companies[(i - 1) % companies.length];
     const customer = await prisma.customer.upsert({
       where: { customerNumber: `CU-2026-${String(i).padStart(4, "0")}` },
       update: {},
