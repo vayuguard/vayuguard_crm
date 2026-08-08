@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,12 +28,16 @@ const loginSchema = z.object({
 
 type LoginValues = z.infer<typeof loginSchema>;
 
-const fieldVariants = {
+const fieldVariants: Variants = {
   hidden: { opacity: 0, y: 12 },
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: 0.12 + i * 0.08, duration: 0.4, ease: [0.22, 1, 0.36, 1] },
+    transition: {
+      delay: 0.12 + i * 0.08,
+      duration: 0.4,
+      ease: [0.22, 1, 0.36, 1] as const,
+    },
   }),
 };
 
@@ -80,7 +84,7 @@ function LoginForm() {
     <motion.div
       initial={{ opacity: 0, y: 24, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] as const }}
     >
       <Card className="overflow-hidden border-border/50 bg-card/90 shadow-xl shadow-teal-950/10 backdrop-blur-md dark:shadow-black/40">
         <CardHeader className="space-y-2 pb-2">
