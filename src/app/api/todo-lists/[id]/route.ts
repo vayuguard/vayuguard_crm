@@ -36,7 +36,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     // Nested item update: { itemId, ...fields } or { item: { id, ... } }
     if (typeof body.itemId === "string") {
       const itemId = body.itemId;
-      const { itemId: _omit, delete: shouldDelete, ...rest } = body;
+      const { itemId: _itemId, delete: shouldDelete, ...rest } = body;
+      void _itemId;
       if (shouldDelete === true) {
         const deleted = await deleteTodoItem(id, itemId);
         await writeAuditLog({

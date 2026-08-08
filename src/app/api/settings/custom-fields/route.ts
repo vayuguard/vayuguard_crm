@@ -12,8 +12,8 @@ import { getClientIp } from "@/server/api/rate-limit";
 export async function GET(request: NextRequest) {
   try {
     await requirePermission("settings:read");
-    const module = request.nextUrl.searchParams.get("module") ?? undefined;
-    return ok(await listCustomFields(module || undefined));
+    const moduleName = request.nextUrl.searchParams.get("module") ?? undefined;
+    return ok(await listCustomFields(moduleName || undefined));
   } catch (error) {
     return fail(error);
   }

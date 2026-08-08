@@ -4,7 +4,6 @@ import { prisma } from "@/server/db/client";
 import {
   emptyToNull,
   optionalCuid,
-  optionalDate,
 } from "@/lib/validators/common";
 import { googleCalendarProvider } from "@/server/providers/calendar";
 

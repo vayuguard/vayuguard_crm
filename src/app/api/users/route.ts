@@ -49,7 +49,11 @@ export async function GET(request: NextRequest) {
       }),
     ]);
     return ok(
-      items.map(({ passwordHash: _, ...u }) => u),
+      items.map((u) => {
+        const { passwordHash, ...safe } = u;
+        void passwordHash;
+        return safe;
+      }),
       paginateMeta(total, pagination.page, pagination.pageSize),
     );
   } catch (error) {
@@ -99,7 +103,8 @@ export async function POST(request: NextRequest) {
       metadata: { email: user.email, role: body.roleSlug },
     });
 
-    const { passwordHash: _, ...safe } = user;
+    const { passwordHash: hash, ...safe } = user;
+    void hash;
     return created(safe);
   } catch (error) {
     return fail(error);

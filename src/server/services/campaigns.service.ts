@@ -116,6 +116,7 @@ export async function updateCampaign(
   input: UpdateCampaignInput,
   _userId: string,
 ) {
+  void _userId;
   const existing = await prisma.campaign.findFirst({
     where: { id, deletedAt: null },
   });

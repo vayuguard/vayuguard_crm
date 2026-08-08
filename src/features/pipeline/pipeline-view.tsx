@@ -117,9 +117,18 @@ export function PipelineView() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
 
-  const stages = activePipeline?.stages ?? [];
-  const deals = dealsQuery.data ?? [];
-  const stageIds = new Set(stages.map((s) => s.id));
+  const stages = React.useMemo(
+    () => activePipeline?.stages ?? [],
+    [activePipeline?.stages],
+  );
+  const deals = React.useMemo(
+    () => dealsQuery.data ?? [],
+    [dealsQuery.data],
+  );
+  const stageIds = React.useMemo(
+    () => new Set(stages.map((s) => s.id)),
+    [stages],
+  );
 
   const forecastByStage = React.useMemo(() => {
     function stageIdOf(deal: Deal): string {

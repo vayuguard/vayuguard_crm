@@ -1,7 +1,6 @@
 import { CampaignChannel, CampaignStatus } from "@prisma/client";
 import { z } from "zod";
 import {
-  cuidSchema,
   emptyToNull,
   optionalDate,
   optionalDecimal,

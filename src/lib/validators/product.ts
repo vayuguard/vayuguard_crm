@@ -3,7 +3,6 @@ import {
   cuidSchema,
   emptyToNull,
   optionalCuid,
-  optionalDecimal,
 } from "./common";
 
 export const createProductSchema = z.object({
