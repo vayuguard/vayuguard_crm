@@ -64,7 +64,45 @@ AUTH_SECRET="long-random-secret"
 AUTH_TRUST_HOST="true"
 ```
 
-Proxy Nginx to `http://127.0.0.1:3200`.
+## Nginx + HTTPS (required for the business-card scanner)
+
+Browsers only expose `navigator.mediaDevices` on secure origins, so the **Scan
+card** camera on `/contacts` will not work — and cannot even show a permission
+prompt — until the CRM is served over HTTPS. Photo upload still works on HTTP.
+
+Create `/etc/nginx/sites-available/crm.yourdomain.com`:
+
+```nginx
+server {
+    listen 80;
+    server_name crm.yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3200;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;   # OCR/report requests can be slow
+        client_max_body_size 25M;  # card photos and document uploads
+    }
+}
+```
+
+Enable it and issue a certificate:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/crm.yourdomain.com /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d crm.yourdomain.com   # adds the TLS block + auto-renew
+```
+
+Point the domain's A record at the VPS first, and make sure `AUTH_URL` /
+`NEXT_PUBLIC_APP_URL` use the `https://` address, then `pm2 restart vayuguard-crm`.
 
 ## Login (after seed)
 

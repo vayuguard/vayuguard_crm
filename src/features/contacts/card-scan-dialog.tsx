@@ -8,6 +8,7 @@ import {
   Loader2,
   RefreshCw,
   ScanLine,
+  ShieldAlert,
   SwitchCamera,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +29,45 @@ import {
 export type ScannedContact = ParsedCard;
 
 type Stage = "capture" | "scanning" | "review";
+
+/**
+ * Browsers expose `navigator.mediaDevices` only on secure origins, so on plain
+ * HTTP the camera cannot be requested at all and no permission prompt appears.
+ */
+function isCameraSupported() {
+  if (typeof navigator === "undefined") return false;
+  return Boolean(navigator.mediaDevices?.getUserMedia);
+}
+
+function insecureOriginMessage() {
+  const host = typeof window !== "undefined" ? window.location.host : "";
+  return `Your browser blocks camera access on insecure (http://) pages, so no permission prompt can be shown. Open the CRM over HTTPS${
+    host ? ` instead of http://${host}` : ""
+  }, or upload a photo of the card below.`;
+}
+
+/** Turns a getUserMedia DOMException into something a user can act on. */
+function cameraErrorMessage(error: unknown) {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as DOMException).name)
+      : "";
+
+  switch (name) {
+    case "NotAllowedError":
+    case "PermissionDeniedError":
+    case "SecurityError":
+      return "Camera permission was blocked for this site. Click the camera or lock icon in your browser's address bar, set Camera to “Allow”, then reload the page and try again.";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+      return "No camera was found on this device. Upload a photo of the card instead.";
+    case "NotReadableError":
+    case "TrackStartError":
+      return "Your camera is already in use by another app (Zoom, Teams, Meet…). Close it and try again.";
+    default:
+      return "Camera could not be started. Upload a photo of the card instead.";
+  }
+}
 
 const EMPTY_CARD: ParsedCard = {
   name: "",
@@ -64,6 +104,8 @@ export function CardScanDialog({
   const [progress, setProgress] = React.useState(0);
   const [fields, setFields] = React.useState<ParsedCard>(EMPTY_CARD);
   const [cameraOn, setCameraOn] = React.useState(false);
+  const [cameraError, setCameraError] = React.useState<string | null>(null);
+  const [starting, setStarting] = React.useState(false);
   const [facingMode, setFacingMode] = React.useState<"environment" | "user">(
     "environment",
   );
@@ -80,12 +122,36 @@ export function CardScanDialog({
 
   const startCamera = React.useCallback(
     async (mode: "environment" | "user") => {
+      setCameraError(null);
+
+      if (!isCameraSupported()) {
+        setCameraError(
+          window.isSecureContext
+            ? "This browser does not support camera capture. Upload a photo of the card instead."
+            : insecureOriginMessage(),
+        );
+        return;
+      }
+
+      setStarting(true);
       try {
         stopCamera();
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: mode, width: { ideal: 1920 } },
-          audio: false,
-        });
+        let stream: MediaStream;
+        try {
+          // Requesting the stream is what triggers the browser's permission prompt.
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: mode, width: { ideal: 1920 } },
+            audio: false,
+          });
+        } catch (error) {
+          // Some desktop webcams reject the facingMode constraint outright.
+          if ((error as DOMException)?.name !== "OverconstrainedError") throw error;
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
+
         streamRef.current = stream;
         setCameraOn(true);
         // The <video> mounts in the same render pass the state flips, so wait a tick.
@@ -95,11 +161,11 @@ export function CardScanDialog({
             void videoRef.current.play().catch(() => undefined);
           }
         });
-      } catch {
-        toast.error(
-          "Camera unavailable. Grant camera permission or upload a photo instead.",
-        );
+      } catch (error) {
+        setCameraError(cameraErrorMessage(error));
         setCameraOn(false);
+      } finally {
+        setStarting(false);
       }
     },
     [stopCamera],
@@ -114,6 +180,7 @@ export function CardScanDialog({
     });
     setProgress(0);
     setFields(EMPTY_CARD);
+    setCameraError(null);
   }, [stopCamera]);
 
   // Release the camera whenever the dialog closes or unmounts.
@@ -121,6 +188,14 @@ export function CardScanDialog({
     if (!open) reset();
     return () => stopCamera();
   }, [open, reset, stopCamera]);
+
+  // Warn about an unusable camera up front rather than after a failed click.
+  React.useEffect(() => {
+    if (!open) return;
+    if (!isCameraSupported() && !window.isSecureContext) {
+      setCameraError(insecureOriginMessage());
+    }
+  }, [open]);
 
   const runOcr = React.useCallback(async (source: string | File) => {
     setStage("scanning");
@@ -258,10 +333,15 @@ export function CardScanDialog({
                 ) : (
                   <Button
                     type="button"
+                    disabled={starting}
                     onClick={() => void startCamera(facingMode)}
                   >
-                    <Camera className="size-4" />
-                    Use camera
+                    {starting ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Camera className="size-4" />
+                    )}
+                    {starting ? "Starting camera…" : "Use camera"}
                   </Button>
                 )}
                 <Button
@@ -273,6 +353,15 @@ export function CardScanDialog({
                   Upload image
                 </Button>
               </div>
+
+              {cameraError ? (
+                <div className="flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                  <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                  <p className="text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+                    {cameraError}
+                  </p>
+                </div>
+              ) : null}
 
               <input
                 ref={fileInputRef}
