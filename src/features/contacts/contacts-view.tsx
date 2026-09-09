@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, ScanLine, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, unwrapList } from "@/lib/api-client";
 import { formatDate } from "@/lib/utils";
@@ -34,6 +34,10 @@ import {
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import {
+  CardScanDialog,
+  type ScannedContact,
+} from "@/features/contacts/card-scan-dialog";
 
 type Contact = {
   id: string;
@@ -115,12 +119,63 @@ function toPayload(values: ContactFormValues) {
   };
 }
 
+/** Strips legal suffixes and punctuation so "Acme Pvt. Ltd." ≈ "Acme". */
+function normalizeCompany(value: string) {
+  return value
+    .toLowerCase()
+    .replace(
+      /\b(?:pvt|private|ltd|limited|llp|inc|incorporated|corp|corporation|co|company)\b/g,
+      " ",
+    )
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function matchCustomerId(company: string, customers: CustomerOption[]) {
+  const target = normalizeCompany(company);
+  if (target.length < 3) return "";
+  const match = customers.find((c) => {
+    const name = normalizeCompany(c.name);
+    return name.length >= 3 && (name === target || name.includes(target) || target.includes(name));
+  });
+  return match?.id ?? "";
+}
+
+/** Maps OCR output onto the contact form; unmapped card details go into notes. */
+function scanToFormValues(
+  card: ScannedContact,
+  customers: CustomerOption[],
+): ContactFormValues {
+  const customerId = card.company ? matchCustomerId(card.company, customers) : "";
+  const noteLines = [
+    !customerId && card.company ? `Company: ${card.company}` : "",
+    card.website ? `Website: ${card.website}` : "",
+    card.address ? `Address: ${card.address}` : "",
+  ].filter(Boolean);
+
+  return {
+    ...emptyForm,
+    name: card.name.trim(),
+    designation: card.designation,
+    email: card.email,
+    phone: card.phone,
+    whatsapp: card.whatsapp,
+    customerId,
+    linkedinUrl: card.linkedinUrl,
+    twitterUrl: card.twitterUrl,
+    facebookUrl: card.facebookUrl,
+    notes: noteLines.join("\n"),
+    tags: "scanned-card",
+  };
+}
+
 export function ContactsView() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const [search, setSearch] = React.useState("");
   const [debounced, setDebounced] = React.useState("");
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [scanOpen, setScanOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Contact | null>(null);
   const [deleting, setDeleting] = React.useState<Contact | null>(null);
 
@@ -154,10 +209,18 @@ export function ContactsView() {
   });
 
   const saveMutation = useMutation({
-    mutationFn: async (values: ContactFormValues) => {
+    // `id` is passed explicitly rather than read from `editing`, so a scan can
+    // always create a new contact even if an edit was opened earlier.
+    mutationFn: async ({
+      values,
+      id,
+    }: {
+      values: ContactFormValues;
+      id?: string | null;
+    }) => {
       const body = toPayload(values);
-      if (editing) {
-        return apiFetch(`/api/contacts/${editing.id}`, {
+      if (id) {
+        return apiFetch(`/api/contacts/${id}`, {
           method: "PATCH",
           body: JSON.stringify(body),
         });
@@ -167,9 +230,10 @@ export function ContactsView() {
         body: JSON.stringify(body),
       });
     },
-    onSuccess: () => {
-      toast.success(editing ? "Contact updated" : "Contact created");
+    onSuccess: (_data, variables) => {
+      toast.success(variables.id ? "Contact updated" : "Contact created");
       setDialogOpen(false);
+      setScanOpen(false);
       setEditing(null);
       form.reset(emptyForm);
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
@@ -191,6 +255,22 @@ export function ContactsView() {
   function openCreate() {
     setEditing(null);
     form.reset(emptyForm);
+    setDialogOpen(true);
+  }
+
+  /** Saves the scanned card straight into a new contact row. */
+  function handleScanConfirm(card: ScannedContact) {
+    setEditing(null);
+    saveMutation.mutate({
+      values: scanToFormValues(card, customersQuery.data ?? []),
+    });
+  }
+
+  /** Sends the scanned details to the full form so more fields can be added. */
+  function handleScanEditInForm(card: ScannedContact) {
+    setEditing(null);
+    form.reset(scanToFormValues(card, customersQuery.data ?? []));
+    setScanOpen(false);
     setDialogOpen(true);
   }
 
@@ -299,10 +379,16 @@ export function ContactsView() {
           className="max-w-xs"
         />
         {can("contacts:write") ? (
-          <Button onClick={openCreate}>
-            <Plus className="size-4" />
-            New contact
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setScanOpen(true)}>
+              <ScanLine className="size-4" />
+              Scan card
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="size-4" />
+              New contact
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -338,7 +424,7 @@ export function ContactsView() {
           <form
             className="grid max-h-[70vh] gap-3 overflow-y-auto pr-1"
             onSubmit={form.handleSubmit((values) =>
-              saveMutation.mutateAsync(values),
+              saveMutation.mutateAsync({ values, id: editing?.id }),
             )}
           >
             <Field label="Name *" error={form.formState.errors.name?.message}>
@@ -428,6 +514,14 @@ export function ContactsView() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <CardScanDialog
+        open={scanOpen}
+        onOpenChange={setScanOpen}
+        onConfirm={handleScanConfirm}
+        onEditInForm={handleScanEditInForm}
+        saving={saveMutation.isPending}
+      />
 
       <ConfirmDialog
         open={!!deleting}
