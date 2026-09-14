@@ -32,7 +32,7 @@ export type NotificationFilters = z.infer<typeof notificationFiltersSchema>;
 export type MarkNotificationsInput = z.infer<typeof markNotificationsSchema>;
 
 export async function createNotification(input: CreateNotificationInput) {
-  return prisma.notification.create({
+  const notification = await prisma.notification.create({
     data: {
       userId: input.userId,
       type: input.type,
@@ -42,6 +42,20 @@ export async function createNotification(input: CreateNotificationInput) {
       metadata: (input.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
     },
   });
+
+  // Fire-and-forget device push — never block CRM writes on push delivery.
+  void import("@/server/services/push.service")
+    .then(({ sendWebPushToUser }) =>
+      sendWebPushToUser(input.userId, {
+        title: notification.title,
+        body: notification.body,
+        link: notification.link,
+        tag: `notification-${notification.id}`,
+      }),
+    )
+    .catch(() => undefined);
+
+  return notification;
 }
 
 export async function listNotifications(

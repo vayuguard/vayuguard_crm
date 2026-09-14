@@ -62,8 +62,22 @@ PORT=3200
 DATABASE_URL="postgresql://USER:PASSWORD@127.0.0.1:5432/vayuguard_crm?schema=public"
 AUTH_SECRET="long-random-secret"
 AUTH_TRUST_HOST="true"
+
+# Device push alerts (generate with: npx web-push generate-vapid-keys)
+NEXT_PUBLIC_VAPID_PUBLIC_KEY="B...."
+VAPID_PRIVATE_KEY="...."
+VAPID_SUBJECT="mailto:admin@vayuguard.com"
 ```
 
+After changing VAPID keys or the Prisma schema:
+
+```bash
+npx prisma db push
+npm run build
+pm2 restart vayuguard-crm
+```
+
+Each user must click **Enable device alerts** once (bell-ring icon or account menu) and allow the browser permission. HTTPS is required for Web Push.
 ## Nginx + HTTPS (required for the business-card scanner)
 
 Browsers only expose `navigator.mediaDevices` on secure origins, so the **Scan

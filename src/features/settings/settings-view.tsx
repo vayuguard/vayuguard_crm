@@ -1053,6 +1053,7 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
     department: "",
     designation: "",
   });
+  const [formError, setFormError] = React.useState<string | null>(null);
 
   const usersQuery = useQuery({
     queryKey: ["users"],
@@ -1069,14 +1070,38 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
     enabled: canWrite,
   });
 
+  function validateInviteForm() {
+    if (form.name.trim().length < 2) {
+      return "Name must be at least 2 characters";
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      return "Enter a valid email address";
+    }
+    if (form.password.length < 8) {
+      return "Password must be at least 8 characters";
+    }
+    if (!form.roleSlug) {
+      return "Select a role";
+    }
+    return null;
+  }
+
   const createMutation = useMutation({
     mutationFn: () =>
       apiFetch("/api/users", {
         method: "POST",
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          password: form.password,
+          roleSlug: form.roleSlug,
+          department: form.department.trim() || undefined,
+          designation: form.designation.trim() || undefined,
+        }),
       }),
     onSuccess: () => {
       toast.success("User invited");
+      setFormError(null);
       setForm({
         name: "",
         email: "",
@@ -1086,8 +1111,12 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
         designation: "",
       });
       queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (err: Error) => {
+      setFormError(err.message);
+      toast.error(err.message);
+    },
   });
 
   if (!canWrite) {
@@ -1106,36 +1135,46 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Name">
+          <Field label="Name *">
             <Input
               value={form.name}
+              placeholder="Rohan Mehta"
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </Field>
-          <Field label="Email">
+          <Field label="Email (login ID) *">
             <Input
               type="email"
               value={form.email}
+              placeholder="rohan@vayuguard.com"
               onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
             />
           </Field>
-          <Field label="Temp password">
+          <Field label="Temp password * (min 8 characters)">
             <Input
               type="password"
               value={form.password}
+              placeholder="At least 8 characters"
+              autoComplete="new-password"
               onChange={(e) =>
                 setForm((f) => ({ ...f, password: e.target.value }))
               }
             />
           </Field>
-          <Field label="Role">
+          <Field label="Role *">
             <Select
               value={form.roleSlug}
               onValueChange={(v) =>
-                setForm((f) => ({ ...f, roleSlug: v ?? "SALES_EXECUTIVE" }))
+                setForm((f) => ({
+                  ...f,
+                  roleSlug:
+                    typeof v === "string" && v.length > 0
+                      ? v
+                      : "SALES_EXECUTIVE",
+                }))
               }
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1159,6 +1198,7 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
           <Field label="Department">
             <Input
               value={form.department}
+              placeholder="Sales"
               onChange={(e) =>
                 setForm((f) => ({ ...f, department: e.target.value }))
               }
@@ -1167,16 +1207,34 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
           <Field label="Designation">
             <Input
               value={form.designation}
+              placeholder="Sales Executive"
               onChange={(e) =>
                 setForm((f) => ({ ...f, designation: e.target.value }))
               }
             />
           </Field>
         </div>
+        {formError ? (
+          <p className="text-sm text-destructive">{formError}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            They log in with this email and temp password. Choose a role so they
+            only see the modules allowed for that role.
+          </p>
+        )}
         <div className="flex justify-end">
           <Button
             disabled={createMutation.isPending}
-            onClick={() => createMutation.mutate()}
+            onClick={() => {
+              const localError = validateInviteForm();
+              if (localError) {
+                setFormError(localError);
+                toast.error(localError);
+                return;
+              }
+              setFormError(null);
+              createMutation.mutate();
+            }}
           >
             {createMutation.isPending ? "Creating…" : "Create user"}
           </Button>

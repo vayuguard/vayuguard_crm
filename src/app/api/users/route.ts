@@ -10,13 +10,30 @@ import { getClientIp, rateLimit } from "@/server/api/rate-limit";
 import { getPagination, paginateMeta } from "@/server/api/pagination";
 import { AppError, validationError } from "@/server/api/errors";
 
+const optionalText = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => (value ? value : undefined));
+
 const createUserSchema = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
-  password: z.string().min(8),
-  roleSlug: z.nativeEnum(RoleSlug),
-  department: z.string().optional(),
-  designation: z.string().optional(),
+  name: z
+    .string()
+    .trim()
+    .min(2, "Name must be at least 2 characters"),
+  email: z
+    .string()
+    .trim()
+    .email("Enter a valid email address")
+    .transform((value) => value.toLowerCase()),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters"),
+  roleSlug: z.nativeEnum(RoleSlug, {
+    message: "Select a valid role",
+  }),
+  department: optionalText,
+  designation: optionalText,
 });
 
 export async function GET(request: NextRequest) {
@@ -69,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     const body = createUserSchema.parse(await request.json());
     const existing = await prisma.user.findUnique({
-      where: { email: body.email.toLowerCase() },
+      where: { email: body.email },
     });
     if (existing) throw validationError("Email already registered");
 
@@ -80,7 +97,7 @@ export async function POST(request: NextRequest) {
     const user = await prisma.user.create({
       data: {
         name: body.name,
-        email: body.email.toLowerCase(),
+        email: body.email,
         passwordHash,
         roleId: role.id,
         employeeProfile: {

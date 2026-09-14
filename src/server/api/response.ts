@@ -33,11 +33,15 @@ export function fail(error: unknown) {
   }
 
   if (error instanceof ZodError) {
+    const firstIssue = error.issues[0];
+    const message = firstIssue
+      ? `${firstIssue.path.join(".") || "input"}: ${firstIssue.message}`
+      : "Validation failed";
     return NextResponse.json(
       {
         data: null,
         error: {
-          message: "Validation failed",
+          message,
           code: "VALIDATION_ERROR",
           details: error.flatten(),
         },

@@ -37,6 +37,7 @@ model User {
   accounts              Account[]
   sessions              Session[]
   employeeProfile       EmployeeProfile?
+  pushSubscriptions     WebPushSubscription[]
   assignedLeads         Lead[]                   @relation("LeadAssignee")
   createdLeads          Lead[]                   @relation("LeadCreatedBy")
   updatedLeads          Lead[]                   @relation("LeadUpdatedBy")
@@ -1089,6 +1090,20 @@ model Notification {
   createdAt DateTime         @default(now())
 
   @@index([userId, isRead, createdAt])
+}
+
+model WebPushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model Mention {

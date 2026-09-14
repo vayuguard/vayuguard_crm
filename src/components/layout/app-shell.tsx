@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Sidebar } from "@/components/layout/sidebar";
+import { MobileNav, Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { CommandPalette } from "@/components/layout/command-palette";
@@ -10,6 +10,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-svh overflow-hidden bg-background">
       <Sidebar />
+      <MobileNav />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <main className="flex-1 overflow-y-auto">

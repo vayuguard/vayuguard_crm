@@ -13,6 +13,31 @@ export type ApiResponse<T> = {
   };
 };
 
+/** Prefer Zod field messages over the generic "Validation failed". */
+function formatApiError(
+  error: NonNullable<ApiResponse<unknown>["error"]> | null | undefined,
+  status: number,
+): string {
+  if (!error) return `Request failed (${status})`;
+
+  const details = error.details as
+    | {
+        fieldErrors?: Record<string, string[] | undefined>;
+        formErrors?: string[];
+      }
+    | undefined;
+
+  const fieldParts = Object.entries(details?.fieldErrors ?? {}).flatMap(
+    ([field, messages]) =>
+      (messages ?? []).map((message) => `${field}: ${message}`),
+  );
+  const formParts = details?.formErrors ?? [];
+  const parts = [...fieldParts, ...formParts].filter(Boolean);
+
+  if (parts.length > 0) return parts.join("; ");
+  return error.message || `Request failed (${status})`;
+}
+
 export async function apiFetch<T>(
   url: string,
   init?: RequestInit,
@@ -33,7 +58,7 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    throw new Error(json?.error?.message ?? `Request failed (${res.status})`);
+    throw new Error(formatApiError(json?.error, res.status));
   }
 
   if (!json) {
@@ -41,7 +66,7 @@ export async function apiFetch<T>(
   }
 
   if (json.error) {
-    throw new Error(json.error.message);
+    throw new Error(formatApiError(json.error, res.status));
   }
 
   return json;
