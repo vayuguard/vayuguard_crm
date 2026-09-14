@@ -1,10 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Trophy } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
+import { Trash2, Trophy } from "lucide-react";
+import { toast } from "sonner";
 import { apiFetch, unwrapList } from "@/lib/api-client";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { usePermissions } from "@/hooks/use-permissions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +18,7 @@ import {
 } from "@/components/shared/data-table";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 
 type Employee = {
   id: string;
@@ -71,8 +75,13 @@ type LeaderboardRow = {
 };
 
 export function EmployeesView() {
+  const queryClient = useQueryClient();
+  const { data: session } = useSession();
+  const { can } = usePermissions();
+  const canManageUsers = can("users:manage");
   const [search, setSearch] = React.useState("");
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [deleting, setDeleting] = React.useState<Employee | null>(null);
 
   const leaderboard = useQuery({
     queryKey: ["employees", "leaderboard"],
@@ -99,6 +108,19 @@ export function EmployeesView() {
       const res = await apiFetch<EmployeeDetail>(`/api/employees/${selectedId}`);
       return res.data;
     },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/api/users/${id}`, { method: "DELETE" }),
+    onSuccess: (_data, id) => {
+      toast.success("Employee deleted");
+      setDeleting(null);
+      if (selectedId === id) setSelectedId(null);
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const columns: DataTableColumn<Employee>[] = [
@@ -136,6 +158,36 @@ export function EmployeesView() {
         </Badge>
       ),
     },
+    ...(canManageUsers
+      ? [
+          {
+            id: "actions",
+            header: "",
+            className: "w-[1%] text-right",
+            cell: (r: Employee) => {
+              const isSelf = r.id === session?.user?.id;
+              return (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={isSelf}
+                  title={
+                    isSelf
+                      ? "You cannot delete your own account"
+                      : "Delete employee"
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleting(r);
+                  }}
+                >
+                  <Trash2 className="size-3.5 text-destructive" />
+                </Button>
+              );
+            },
+          } satisfies DataTableColumn<Employee>,
+        ]
+      : []),
   ];
 
   const top = leaderboard.data ?? [];
@@ -329,10 +381,35 @@ export function EmployeesView() {
               >
                 Close
               </Button>
+              {canManageUsers && detail.id !== session?.user?.id ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setDeleting(detail)}
+                >
+                  <Trash2 className="size-3.5" />
+                  Delete employee
+                </Button>
+              ) : null}
             </div>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!deleting}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title="Delete employee?"
+        description={`This removes login access for ${
+          deleting?.name ?? deleting?.email ?? "this employee"
+        }. They will no longer appear in the employee list.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        loading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleting) deleteMutation.mutate(deleting.id);
+        }}
+      />
     </div>
   );
 }

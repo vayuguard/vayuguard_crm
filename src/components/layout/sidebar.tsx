@@ -15,7 +15,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
   SheetContent,
@@ -135,7 +134,7 @@ export function Sidebar() {
         initial={false}
         animate={{ width: sidebarCollapsed ? 68 : 240 }}
         transition={{ type: "spring", stiffness: 320, damping: 32 }}
-        className="relative z-30 hidden h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex"
+        className="relative z-30 hidden h-svh min-h-0 shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex"
       >
         <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-3">
           <Link
@@ -172,9 +171,9 @@ export function Sidebar() {
           </Button>
         </div>
 
-        <ScrollArea className="flex-1 px-2 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3">
           <NavLinks collapsed={sidebarCollapsed} />
-        </ScrollArea>
+        </div>
 
         {!sidebarCollapsed ? (
           <div className="border-t border-sidebar-border p-3">
@@ -207,12 +206,12 @@ export function MobileNav() {
             VayuGuard
           </SheetTitle>
         </SheetHeader>
-        <ScrollArea className="h-[calc(100svh-3.5rem)] px-2 py-3">
+        <div className="h-[calc(100svh-3.5rem)] overflow-y-auto overscroll-contain px-2 py-3">
           <NavLinks
             collapsed={false}
             onNavigate={() => setMobileNavOpen(false)}
           />
-        </ScrollArea>
+        </div>
       </SheetContent>
     </Sheet>
   );

@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/select";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { Trash2 } from "lucide-react";
 
 type CompanySettings = {
   id?: string;
@@ -1045,6 +1047,7 @@ export function SettingsView() {
 
 function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
   const queryClient = useQueryClient();
+  const { data: session } = useSession();
   const [form, setForm] = React.useState({
     name: "",
     email: "",
@@ -1054,6 +1057,11 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
     designation: "",
   });
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [deleting, setDeleting] = React.useState<{
+    id: string;
+    name?: string | null;
+    email: string;
+  } | null>(null);
 
   const usersQuery = useQuery({
     queryKey: ["users"],
@@ -1117,6 +1125,18 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
       setFormError(err.message);
       toast.error(err.message);
     },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/api/users/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("User deleted");
+      setDeleting(null);
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   if (!canWrite) {
@@ -1244,21 +1264,64 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
           <LoadingSkeleton rows={4} />
         ) : (
           <div className="space-y-2">
-            {(usersQuery.data ?? []).map((u) => (
-              <div
-                key={u.id}
-                className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm"
-              >
-                <div>
-                  <p className="font-medium">{u.name ?? u.email}</p>
-                  <p className="text-xs text-muted-foreground">{u.email}</p>
+            {(usersQuery.data ?? []).map((u) => {
+              const isSelf = u.id === session?.user?.id;
+              return (
+                <div
+                  key={u.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{u.name ?? u.email}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {u.email}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge variant="secondary">
+                      {u.role?.name ?? u.role?.slug}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={isSelf}
+                      title={
+                        isSelf
+                          ? "You cannot delete your own account"
+                          : "Delete user"
+                      }
+                      onClick={() =>
+                        setDeleting({
+                          id: u.id,
+                          name: u.name,
+                          email: u.email,
+                        })
+                      }
+                    >
+                      <Trash2 className="size-3.5 text-destructive" />
+                    </Button>
+                  </div>
                 </div>
-                <Badge variant="secondary">{u.role?.name ?? u.role?.slug}</Badge>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>
+
+      <ConfirmDialog
+        open={!!deleting}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title="Delete user?"
+        description={`This will remove login access for ${
+          deleting?.name ?? deleting?.email ?? "this user"
+        }. Their CRM records stay assigned historically, but they can no longer sign in.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        loading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleting) deleteMutation.mutate(deleting.id);
+        }}
+      />
     </Card>
   );
 }

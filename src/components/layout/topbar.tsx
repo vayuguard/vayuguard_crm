@@ -229,19 +229,6 @@ export function Topbar() {
       </button>
 
       <div className="ml-auto flex items-center gap-1">
-        {pushState !== "granted" && pushState !== "unsupported" ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Enable device alerts"
-            title="Enable device alerts"
-            disabled={enablingPush}
-            onClick={() => void handleEnableDeviceAlerts()}
-          >
-            <BellRing className="size-4" />
-          </Button>
-        ) : null}
-
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
