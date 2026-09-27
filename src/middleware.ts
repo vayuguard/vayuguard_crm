@@ -3,14 +3,25 @@ import { NextResponse } from "next/server";
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
-  const isLoggedIn = !!req.auth;
+  const isLoggedIn = Boolean(req.auth?.user?.id);
 
   const isPublic =
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/health");
+    pathname.startsWith("/api/health") ||
+    pathname === "/sw.js";
 
   if (!isLoggedIn && !isPublic) {
+    // API callers should get 401 JSON, not an HTML login redirect.
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        {
+          data: null,
+          error: { message: "Unauthorized", code: "UNAUTHORIZED" },
+        },
+        { status: 401 },
+      );
+    }
     const loginUrl = new URL("/login", req.nextUrl.origin);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);

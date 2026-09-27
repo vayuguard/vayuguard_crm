@@ -47,3 +47,6 @@ next-env.d.ts
 
 # local docs (keep on machine / VPS, do not publish)
 /docs/
+
+# one-off local/VPS helper scripts (not part of the app deploy)
+/scripts/

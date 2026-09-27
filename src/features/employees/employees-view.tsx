@@ -406,8 +406,8 @@ export function EmployeesView() {
         confirmLabel="Delete"
         variant="destructive"
         loading={deleteMutation.isPending}
-        onConfirm={() => {
-          if (deleting) deleteMutation.mutate(deleting.id);
+        onConfirm={async () => {
+          if (deleting) await deleteMutation.mutateAsync(deleting.id);
         }}
       />
     </div>

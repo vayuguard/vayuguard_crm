@@ -83,34 +83,112 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       : []),
   ],
   callbacks: {
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user, trigger, session }) {
       if (user) {
         token.id = user.id!;
         token.role = (user as { role?: RoleSlug }).role;
         token.roleId = (user as { roleId?: string }).roleId;
-        token.permissions = (user as { permissions?: string[] }).permissions ?? [];
+        token.permissions =
+          (user as { permissions?: string[] }).permissions ?? [];
+        (token as { lastCheckedAt?: number }).lastCheckedAt = Date.now();
       }
 
-      if (trigger === "update" && token.id) {
-        const dbUser = await prisma.user.findUnique({
-          where: { id: token.id as string },
-          include: { role: true },
-        });
-        if (dbUser) {
-          token.role = dbUser.role.slug;
-          token.roleId = dbUser.roleId;
-          token.permissions = await getUserPermissions(
-            dbUser.roleId,
-            dbUser.role.slug,
-          );
+      // Immediate client-driven session updates (e.g. rename self).
+      if (trigger === "update" && session && typeof session === "object") {
+        const patch = session as { name?: string };
+        if (typeof patch.name === "string" && patch.name.trim().length >= 2) {
+          token.name = patch.name.trim();
         }
+      }
+
+      const userId = (token.id ?? token.sub) as string | undefined;
+      if (!userId) return token;
+
+      // Always keep token.id in sync so session.user.id is reliable for guards.
+      token.id = userId;
+
+      // On every request: if Super Admin deleted this account, kill this JWT
+      // immediately so that user is logged out on their next page/API hit.
+      try {
+        const account = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            name: true,
+            email: true,
+            deletedAt: true,
+            isActive: true,
+            roleId: true,
+            role: { select: { slug: true } },
+          },
+        });
+
+        if (!account || account.deletedAt || !account.isActive) {
+          return {
+            ...token,
+            id: undefined,
+            sub: undefined,
+            role: undefined,
+            roleId: undefined,
+            permissions: [],
+            error: "AccountDisabled",
+            exp: Math.floor(Date.now() / 1000) - 30,
+          };
+        }
+
+        // Keep display name in sync (e.g. after Super Admin renames anyone,
+        // including themselves).
+        token.name = account.name ?? token.name;
+        if (account.email) token.email = account.email;
+
+        // Refresh role permissions when asked, or about once a minute.
+        const shouldRefreshPermissions =
+          trigger === "update" ||
+          !token.permissions ||
+          (token as { lastCheckedAt?: number }).lastCheckedAt == null ||
+          Date.now() -
+            Number((token as { lastCheckedAt?: number }).lastCheckedAt) >
+            60_000;
+
+        if (shouldRefreshPermissions) {
+          token.role = account.role.slug;
+          token.roleId = account.roleId;
+          token.permissions = await getUserPermissions(
+            account.roleId,
+            account.role.slug,
+          );
+          (token as { lastCheckedAt?: number }).lastCheckedAt = Date.now();
+        }
+      } catch {
+        // Keep the existing token on transient DB errors.
       }
 
       return token;
     },
     async session({ session, token }) {
+      if (
+        (token as { error?: string }).error === "AccountDisabled" ||
+        !token.id
+      ) {
+        // Deleted/disabled account → treated as signed out.
+        return {
+          ...session,
+          user: {
+            ...session.user,
+            id: "",
+            email: null,
+            name: null,
+            image: null,
+            role: undefined as never,
+            roleId: "",
+            permissions: [],
+          },
+        };
+      }
       if (session.user) {
         session.user.id = token.id as string;
+        session.user.name = (token.name as string | null | undefined) ?? session.user.name;
+        session.user.email =
+          (token.email as string | null | undefined) ?? session.user.email;
         session.user.role = token.role as RoleSlug;
         session.user.roleId = token.roleId as string;
         session.user.permissions = (token.permissions as string[]) ?? [];

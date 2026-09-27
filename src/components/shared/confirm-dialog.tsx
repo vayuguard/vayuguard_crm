@@ -44,14 +44,22 @@ export function ConfirmDialog({
           ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={loading}>{cancelLabel}</AlertDialogCancel>
+          <AlertDialogCancel disabled={loading} type="button">
+            {cancelLabel}
+          </AlertDialogCancel>
           <AlertDialogAction
+            type="button"
             variant={variant === "destructive" ? "destructive" : "default"}
             disabled={loading}
             onClick={async (e) => {
               e.preventDefault();
-              await onConfirm();
-              onOpenChange(false);
+              e.stopPropagation();
+              try {
+                await onConfirm();
+                onOpenChange(false);
+              } catch {
+                // Keep the dialog open so the caller can show an error toast.
+              }
             }}
           >
             {loading ? "Please wait…" : confirmLabel}

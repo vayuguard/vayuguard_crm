@@ -26,7 +26,13 @@ import {
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { Trash2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Pencil, Trash2 } from "lucide-react";
 
 type CompanySettings = {
   id?: string;
@@ -1047,7 +1053,7 @@ export function SettingsView() {
 
 function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
   const queryClient = useQueryClient();
-  const { data: session } = useSession();
+  const { data: session, update: updateSession } = useSession();
   const [form, setForm] = React.useState({
     name: "",
     email: "",
@@ -1062,6 +1068,12 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
     name?: string | null;
     email: string;
   } | null>(null);
+  const [editing, setEditing] = React.useState<{
+    id: string;
+    name: string;
+    email: string;
+  } | null>(null);
+  const [editName, setEditName] = React.useState("");
 
   const usersQuery = useQuery({
     queryKey: ["users"],
@@ -1125,6 +1137,25 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
       setFormError(err.message);
       toast.error(err.message);
     },
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiFetch(`/api/users/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: async (_data, variables) => {
+      toast.success("Username updated");
+      setEditing(null);
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      // Refresh the topbar name immediately when renaming yourself.
+      if (variables.id === session?.user?.id) {
+        await updateSession({ name: variables.name });
+      }
+    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const deleteMutation = useMutation({
@@ -1272,15 +1303,37 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
                   className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm"
                 >
                   <div className="min-w-0">
-                    <p className="truncate font-medium">{u.name ?? u.email}</p>
+                    <p className="truncate font-medium">
+                      {u.name ?? u.email}
+                      {isSelf ? (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          (you)
+                        </span>
+                      ) : null}
+                    </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {u.email}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-1">
                     <Badge variant="secondary">
                       {u.role?.name ?? u.role?.slug}
                     </Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      title="Change username"
+                      onClick={() => {
+                        setEditing({
+                          id: u.id,
+                          name: u.name ?? "",
+                          email: u.email,
+                        });
+                        setEditName(u.name ?? "");
+                      }}
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -1308,6 +1361,72 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
         )}
       </CardContent>
 
+      <Dialog
+        open={!!editing}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>Change username</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Login email stays the same
+              {editing?.email ? ` (${editing.email})` : ""}. Only the display
+              name changes.
+            </p>
+            <Field label="Username *">
+              <Input
+                value={editName}
+                placeholder="Super Admin"
+                autoFocus
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const name = editName.trim();
+                    if (name.length < 2) {
+                      toast.error("Name must be at least 2 characters");
+                      return;
+                    }
+                    if (editing) {
+                      renameMutation.mutate({ id: editing.id, name });
+                    }
+                  }
+                }}
+              />
+            </Field>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={renameMutation.isPending}
+                onClick={() => {
+                  const name = editName.trim();
+                  if (name.length < 2) {
+                    toast.error("Name must be at least 2 characters");
+                    return;
+                  }
+                  if (editing) {
+                    renameMutation.mutate({ id: editing.id, name });
+                  }
+                }}
+              >
+                {renameMutation.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(open) => !open && setDeleting(null)}
@@ -1318,8 +1437,8 @@ function UsersSettingsTab({ canWrite }: { canWrite: boolean }) {
         confirmLabel="Delete"
         variant="destructive"
         loading={deleteMutation.isPending}
-        onConfirm={() => {
-          if (deleting) deleteMutation.mutate(deleting.id);
+        onConfirm={async () => {
+          if (deleting) await deleteMutation.mutateAsync(deleting.id);
         }}
       />
     </Card>

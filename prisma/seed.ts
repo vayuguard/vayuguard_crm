@@ -77,7 +77,7 @@ async function seedUsers() {
   const passwordHash = await bcrypt.hash("Password@123", 10);
 
   const users = [
-    { email: "admin@vayuguard.com", name: "Aarav Sharma", role: "SUPER_ADMIN" as RoleSlug, dept: "Management", designation: "CEO" },
+    { email: "admin@vayuguard.com", name: "Super Admin", role: "SUPER_ADMIN" as RoleSlug, dept: "Management", designation: "CEO" },
     { email: "manager@vayuguard.com", name: "Priya Patel", role: "SALES_MANAGER" as RoleSlug, dept: "Sales", designation: "Sales Manager" },
     { email: "sales1@vayuguard.com", name: "Rohan Mehta", role: "SALES_EXECUTIVE" as RoleSlug, dept: "Sales", designation: "Sales Executive" },
     { email: "sales2@vayuguard.com", name: "Neha Gupta", role: "SALES_EXECUTIVE" as RoleSlug, dept: "Sales", designation: "Sales Executive" },
