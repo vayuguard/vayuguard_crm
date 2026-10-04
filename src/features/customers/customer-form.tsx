@@ -27,6 +27,8 @@ export const customerFormSchema = z.object({
   phone: z.string().optional(),
   gstNumber: z.string().optional(),
   panNumber: z.string().optional(),
+  gstTreatment: z.string().optional(),
+  placeOfSupply: z.string().optional(),
   billingAddress: z.string().optional(),
   billingCity: z.string().optional(),
   billingState: z.string().optional(),
@@ -62,6 +64,8 @@ const emptyDefaults: CustomerFormValues = {
   phone: "",
   gstNumber: "",
   panNumber: "",
+  gstTreatment: "",
+  placeOfSupply: "",
   billingAddress: "",
   billingCity: "",
   billingState: "",
@@ -127,6 +131,18 @@ export function CustomerForm({
         </Field>
         <Field label="PAN number">
           <Input {...form.register("panNumber")} />
+        </Field>
+        <Field label="GST treatment">
+          <Input
+            {...form.register("gstTreatment")}
+            placeholder="business_gst / consumer"
+          />
+        </Field>
+        <Field label="Place of supply">
+          <Input
+            {...form.register("placeOfSupply")}
+            placeholder="State code e.g. 27"
+          />
         </Field>
       </div>
 
@@ -239,6 +255,8 @@ export function toCustomerPayload(values: CustomerFormValues) {
     phone: values.phone || null,
     gstNumber: values.gstNumber || null,
     panNumber: values.panNumber || null,
+    gstTreatment: values.gstTreatment || null,
+    placeOfSupply: values.placeOfSupply || null,
     billingAddress: values.billingAddress || null,
     billingCity: values.billingCity || null,
     billingState: values.billingState || null,

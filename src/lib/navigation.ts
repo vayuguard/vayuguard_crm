@@ -18,6 +18,7 @@ import {
   Settings,
   Shield,
   MessagesSquare,
+  BookOpen,
 } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 
@@ -113,6 +114,12 @@ export const NAV_ITEMS: NavItem[] = [
     title: "Settings",
     href: "/settings",
     icon: Settings,
+    permission: "settings:read",
+  },
+  {
+    title: "Zoho Sync",
+    href: "/settings/zoho",
+    icon: BookOpen,
     permission: "settings:read",
   },
   { title: "Audit", href: "/audit", icon: Shield, permission: "audit:read" },

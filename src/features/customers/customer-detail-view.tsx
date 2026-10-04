@@ -26,6 +26,7 @@ import {
   toCustomerPayload,
   type CustomerFormValues,
 } from "@/features/customers/customer-form";
+import { ZohoSyncBadge } from "@/features/zoho/zoho-sync-badge";
 
 type CustomerDetail = {
   id: string;
@@ -38,6 +39,8 @@ type CustomerDetail = {
   phone?: string | null;
   gstNumber?: string | null;
   panNumber?: string | null;
+  gstTreatment?: string | null;
+  placeOfSupply?: string | null;
   billingAddress?: string | null;
   billingCity?: string | null;
   billingState?: string | null;
@@ -271,6 +274,8 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
           ) : null}
         </div>
       </div>
+
+      <ZohoSyncBadge entityType="customer" crmId={c.id} />
 
       <Tabs defaultValue="overview">
         <TabsList className="flex h-auto flex-wrap gap-1">
@@ -560,6 +565,8 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
               phone: c.phone ?? "",
               gstNumber: c.gstNumber ?? "",
               panNumber: c.panNumber ?? "",
+              gstTreatment: c.gstTreatment ?? "",
+              placeOfSupply: c.placeOfSupply ?? "",
               billingAddress: c.billingAddress ?? "",
               billingCity: c.billingCity ?? "",
               billingState: c.billingState ?? "",

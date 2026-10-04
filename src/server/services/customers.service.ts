@@ -10,6 +10,7 @@ import {
   optionalUrl,
 } from "@/lib/validators/common";
 import { nextCustomerNumber } from "@/server/services/leads.service";
+import { queueCustomerSync } from "@/server/integrations/zoho/triggers";
 
 export const createCustomerSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -20,6 +21,8 @@ export const createCustomerSchema = z.object({
   phone: emptyToNull,
   gstNumber: emptyToNull,
   panNumber: emptyToNull,
+  gstTreatment: emptyToNull,
+  placeOfSupply: emptyToNull,
   billingAddress: emptyToNull,
   billingCity: emptyToNull,
   billingState: emptyToNull,
@@ -186,7 +189,7 @@ export async function createCustomer(
   userId: string,
 ) {
   const customerNumber = await nextCustomerNumber();
-  return prisma.customer.create({
+  const customer = await prisma.customer.create({
     data: {
       ...input,
       customerNumber,
@@ -196,6 +199,8 @@ export async function createCustomer(
     },
     include: customerInclude,
   });
+  void queueCustomerSync(customer.id).catch(() => undefined);
+  return customer;
 }
 
 export async function updateCustomer(
@@ -208,11 +213,13 @@ export async function updateCustomer(
   });
   if (!existing) throw notFound("Customer not found");
 
-  return prisma.customer.update({
+  const customer = await prisma.customer.update({
     where: { id },
     data: { ...input, updatedById: userId },
     include: customerInclude,
   });
+  void queueCustomerSync(customer.id).catch(() => undefined);
+  return customer;
 }
 
 export async function deleteCustomer(id: string, userId: string) {

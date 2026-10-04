@@ -15,6 +15,10 @@ import type {
   InvoiceFilters,
   UpdateInvoiceInput,
 } from "@/lib/validators/invoice";
+import {
+  queueInvoiceSync,
+  queuePaymentSync,
+} from "@/server/integrations/zoho/triggers";
 
 const invoiceInclude = {
   customer: {
@@ -179,7 +183,7 @@ export async function createInvoice(input: CreateInvoiceInput, userId: string) {
     input.status,
   );
 
-  return prisma.invoice.create({
+  const invoice = await prisma.invoice.create({
     data: {
       invoiceNumber,
       customerId: input.customerId,
@@ -210,6 +214,8 @@ export async function createInvoice(input: CreateInvoiceInput, userId: string) {
     },
     include: invoiceInclude,
   });
+  void queueInvoiceSync(invoice.id).catch(() => undefined);
+  return invoice;
 }
 
 export async function updateInvoice(
@@ -260,7 +266,7 @@ export async function updateInvoice(
       });
     }
 
-    return tx.invoice.update({
+    const updated = await tx.invoice.update({
       where: { id },
       data: {
         customerId: input.customerId,
@@ -286,6 +292,8 @@ export async function updateInvoice(
       },
       include: invoiceInclude,
     });
+    void queueInvoiceSync(id).catch(() => undefined);
+    return updated;
   });
 }
 
@@ -328,7 +336,7 @@ export async function recordPayment(
     invoice.status,
   );
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.create({
       data: {
         paymentNumber,
@@ -356,6 +364,8 @@ export async function recordPayment(
 
     return { payment, invoice: updatedInvoice };
   });
+  void queuePaymentSync(result.payment.id).catch(() => undefined);
+  return result;
 }
 
 export async function getInvoicePdfPayload(id: string) {

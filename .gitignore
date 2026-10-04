@@ -46,7 +46,14 @@ yarn-error.log*
 next-env.d.ts
 
 # local docs (keep on machine / VPS, do not publish)
-/docs/
+# Ignore contents but keep selected tracked files (parent dir must not be fully ignored)
+/docs/*
+!/docs/ZOHO_INTEGRATION.md
+!/docs/do.md
 
 # one-off local/VPS helper scripts (not part of the app deploy)
-/scripts/
+/scripts/*
+!/scripts/zoho-*.ts
+
+# Zoho migration reports / local temp
+/tmp/

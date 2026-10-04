@@ -186,10 +186,7 @@ async function main() {
 
   await seedPermissionsAndRoles();
   const users = await seedUsers();
-  const admin = users[0];
-  const sales1 = users[2];
-  const sales2 = users[3];
-  const support = users[5];
+  void users;
 
   await prisma.companySettings.upsert({
     where: { id: "company-settings" },
@@ -231,6 +228,22 @@ async function main() {
   });
 
   const pipeline = await seedPipeline();
+
+  // Production / default: system data only (roles, users, settings, pipeline).
+  // Sample leads/customers/invoices etc. only when SEED_DEMO=true.
+  if (process.env.SEED_DEMO !== "true") {
+    console.log("System seed complete — no demo CRM records created.");
+    console.log("Tip: set SEED_DEMO=true to also load sample data.");
+    console.log("Login: admin@vayuguard.com / Password@123");
+    return;
+  }
+
+  console.log("SEED_DEMO=true — loading sample CRM data…");
+  const admin = users[0];
+  const sales1 = users[2];
+  const sales2 = users[3];
+  const support = users[5];
+
   const stages = await prisma.pipelineStage.findMany({
     where: { pipelineId: pipeline.id },
     orderBy: { position: "asc" },

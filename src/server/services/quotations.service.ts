@@ -10,6 +10,7 @@ import type {
   QuotationItemInput,
   UpdateQuotationInput,
 } from "@/lib/validators/quotation";
+import { queueQuotationSync } from "@/server/integrations/zoho/triggers";
 
 const quotationInclude = {
   customer: { select: { id: true, name: true, customerNumber: true, email: true } },
@@ -130,7 +131,7 @@ export async function createQuotation(
   const totals = calcDocumentTotals(input.items, input.discountAmount ?? 0);
   const quoteNumber = await nextQuoteNumber();
 
-  return prisma.quotation.create({
+  const quotation = await prisma.quotation.create({
     data: {
       quoteNumber,
       customerId: input.customerId,
@@ -172,6 +173,8 @@ export async function createQuotation(
     },
     include: quotationInclude,
   });
+  void queueQuotationSync(quotation.id).catch(() => undefined);
+  return quotation;
 }
 
 export async function updateQuotation(
@@ -251,6 +254,7 @@ export async function updateQuotation(
       });
     }
 
+    void queueQuotationSync(id).catch(() => undefined);
     return updated;
   });
 }

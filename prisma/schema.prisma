@@ -301,6 +301,10 @@ model Customer {
   phone          String?
   gstNumber      String?
   panNumber      String?
+  /// Zoho Books gst_treatment (e.g. business_gst, consumer). Optional.
+  gstTreatment   String?
+  /// State code / name for place_of_supply. Falls back to billingState when empty.
+  placeOfSupply  String?
   billingAddress String?   @db.Text
   billingCity    String?
   billingState   String?
@@ -644,6 +648,8 @@ model Product {
   description String?          @db.Text
   price       Decimal          @db.Decimal(14, 2)
   gstPercent  Decimal          @default(18) @db.Decimal(5, 2)
+  /// Optional HSN/SAC code for Zoho Books / GST India mapping
+  hsnSac      String?
   categoryId  String?
   category    ProductCategory? @relation(fields: [categoryId], references: [id])
   inventory   Int              @default(0)
@@ -1212,4 +1218,95 @@ model AiInsight {
 
   @@index([entityType, entityId])
   @@index([type, createdAt])
+}
+
+// ─── Zoho Books integration ─────────────────────────────────────────────────
+
+enum ZohoEntityType {
+  customer
+  quotation
+  invoice
+  payment
+}
+
+enum ZohoSyncDirection {
+  crm_to_zoho
+  zoho_to_crm
+}
+
+enum ZohoSyncStatus {
+  pending
+  success
+  failed
+  skipped
+}
+
+enum ZohoQueueStatus {
+  pending
+  processing
+  succeeded
+  failed
+  dead
+}
+
+model ZohoLink {
+  id               String         @id @default(cuid())
+  entityType       ZohoEntityType
+  crmId            String
+  zohoId           String
+  zohoLastModified DateTime?
+  lastSyncedAt     DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([entityType, crmId])
+  @@unique([entityType, zohoId])
+  @@index([lastSyncedAt])
+}
+
+model ZohoSyncLog {
+  id              String            @id @default(cuid())
+  direction       ZohoSyncDirection
+  entityType      ZohoEntityType?
+  crmId           String?
+  zohoId          String?
+  action          String
+  requestPayload  Json?
+  responsePayload Json?
+  status          ZohoSyncStatus    @default(pending)
+  errorMessage    String?           @db.Text
+  attempts        Int               @default(0)
+  createdAt       DateTime          @default(now())
+
+  @@index([status, createdAt])
+  @@index([entityType, crmId])
+  @@index([direction, createdAt])
+}
+
+model ZohoSyncState {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model ZohoSyncQueue {
+  id         String          @id @default(cuid())
+  jobType    String
+  payload    Json
+  status     ZohoQueueStatus @default(pending)
+  attempts   Int             @default(0)
+  nextRunAt  DateTime        @default(now())
+  lastError  String?         @db.Text
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([status, nextRunAt])
+  @@index([jobType, status])
+}
+
+model ZohoTokenCache {
+  id           String   @id @default("zoho-token")
+  accessToken  String   @db.Text
+  expiresAt    DateTime
+  updatedAt    DateTime @updatedAt
 }

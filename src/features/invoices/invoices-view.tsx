@@ -34,6 +34,7 @@ import {
 } from "@/components/shared/data-table";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ZohoSyncBadge } from "@/features/zoho/zoho-sync-badge";
 
 type CustomerOption = { id: string; name: string };
 type ProductOption = {
@@ -629,6 +630,8 @@ export function InvoicesView() {
                   {detail.customer?.name ?? "—"}
                 </span>
               </div>
+
+              <ZohoSyncBadge entityType="invoice" crmId={detail.id} />
 
               <div className="grid gap-2 text-sm sm:grid-cols-3">
                 <DetailStat label="Total" value={formatCurrency(detail.total)} />
