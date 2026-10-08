@@ -49,6 +49,7 @@ next-env.d.ts
 # Ignore contents but keep selected tracked files (parent dir must not be fully ignored)
 /docs/*
 !/docs/ZOHO_INTEGRATION.md
+!/docs/USER_GUIDE.md
 !/docs/do.md
 
 # one-off local/VPS helper scripts (not part of the app deploy)

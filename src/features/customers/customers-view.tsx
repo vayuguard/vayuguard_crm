@@ -24,6 +24,7 @@ import {
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { BulkExcelActions } from "@/components/shared/bulk-excel-actions";
 import {
   CustomerForm,
   toCustomerPayload,
@@ -204,17 +205,32 @@ export function CustomersView() {
           placeholder="Search customers…"
           className="max-w-xs"
         />
-        {can("customers:write") ? (
-          <Button
-            onClick={() => {
-              setEditing(null);
-              setDialogOpen(true);
-            }}
-          >
-            <Plus className="size-4" />
-            New customer
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <BulkExcelActions
+            entityLabel="customers"
+            queryKey={["customers"]}
+            exportUrl={
+              debounced
+                ? `/api/customers/export?q=${encodeURIComponent(debounced)}`
+                : "/api/customers/export"
+            }
+            templateUrl="/api/customers/export?template=1"
+            importUrl="/api/customers/import"
+            canExport={can("customers:export")}
+            canImport={can("customers:import")}
+          />
+          {can("customers:write") ? (
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="size-4" />
+              New customer
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {query.isLoading ? (

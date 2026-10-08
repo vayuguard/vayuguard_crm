@@ -5,6 +5,7 @@ import {
   searchContacts,
   updateContactJson,
 } from "@/server/integrations/zoho/client";
+import { isZohoOutboundEnabled } from "@/server/integrations/zoho/config";
 import { isZohoSyncEnabled } from "@/server/integrations/zoho/sync-enabled";
 import { mapCustomerToZohoContact } from "@/server/integrations/zoho/mappers/customer";
 import {
@@ -16,16 +17,26 @@ export async function syncCustomerToZoho(
   customerId: string,
   opts?: { force?: boolean },
 ) {
+  if (!isZohoOutboundEnabled()) {
+    return { skipped: true as const, reason: "outbound_disabled" as const };
+  }
   if (!opts?.force && !(await isZohoSyncEnabled())) {
     return { skipped: true as const };
   }
 
   const customer = await prisma.customer.findFirst({
     where: { id: customerId, deletedAt: null },
+    include: {
+      contacts: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+      },
+    },
   });
   if (!customer) throw new Error(`Customer ${customerId} not found`);
 
-  const payload = mapCustomerToZohoContact(customer);
+  const payload = mapCustomerToZohoContact(customer, customer.contacts[0]);
   const existing = await getZohoLink(ZohoEntityType.customer, customerId);
 
   if (existing?.zohoId) {

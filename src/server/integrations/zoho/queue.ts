@@ -14,23 +14,33 @@ export type ZohoJobType =
   | "pull_updates"
   | "process_webhook";
 
+const OUTBOUND_JOBS = new Set<ZohoJobType>([
+  "sync_customer",
+  "sync_quotation",
+  "sync_invoice",
+  "sync_payment",
+]);
+
+export function isZohoOutboundJob(jobType: string) {
+  return OUTBOUND_JOBS.has(jobType as ZohoJobType);
+}
+
+/**
+ * Enqueue background work. Outbound CRM→Zoho jobs are never queued
+ * (inbound-only mode). Webhooks + pull_updates are allowed when pull is enabled.
+ */
 export async function enqueueZohoJob(
   jobType: ZohoJobType,
   payload: Record<string, unknown>,
   opts?: { delayMs?: number },
 ) {
+  if (isZohoOutboundJob(jobType)) {
+    return null;
+  }
+
   const enabled = await isZohoSyncEnabled();
   if (!enabled && jobType !== "process_webhook") {
-    // Webhooks still enqueue for audit; outbound CRM jobs skip when disabled.
-    if (
-      jobType === "sync_customer" ||
-      jobType === "sync_quotation" ||
-      jobType === "sync_invoice" ||
-      jobType === "sync_payment" ||
-      jobType === "pull_updates"
-    ) {
-      return null;
-    }
+    return null;
   }
 
   const nextRunAt = new Date(Date.now() + (opts?.delayMs ?? 0));

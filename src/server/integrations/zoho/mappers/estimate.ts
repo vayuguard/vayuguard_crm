@@ -10,6 +10,7 @@ import {
   resolvePlaceOfSupply,
   taxIdForPercent,
 } from "@/server/integrations/zoho/mappers/gst";
+import { ZOHO_LINE, ZOHO_TXN } from "@/server/integrations/zoho/fields";
 
 type QuotationWithRelations = Quotation & {
   customer: Customer | null;
@@ -32,24 +33,24 @@ export function mapQuotationToZohoEstimate(
   }
 
   return {
-    customer_id: zohoCustomerId,
-    estimate_number: quotation.quoteNumber,
-    date: fmtDate(quotation.createdAt),
-    expiry_date: quotation.validUntil
+    [ZOHO_TXN.customerId]: zohoCustomerId,
+    [ZOHO_TXN.estimateNumber]: quotation.quoteNumber,
+    [ZOHO_TXN.date]: fmtDate(quotation.createdAt),
+    [ZOHO_TXN.expiryDate]: quotation.validUntil
       ? fmtDate(quotation.validUntil)
       : undefined,
-    notes: quotation.notes ?? undefined,
-    gst_treatment: resolveGstTreatment(quotation.customer),
-    place_of_supply: resolvePlaceOfSupply(quotation.customer),
-    is_inclusive_tax: false,
-    line_items: quotation.items.map((item) => ({
-      name: item.product?.name ?? item.description,
-      description: item.description,
-      rate: Number(item.unitPrice),
-      quantity: Number(item.quantity),
-      discount: Number(item.discount),
-      tax_percentage: taxIdForPercent(Number(item.taxPercent)),
-      hsn_or_sac: item.product?.hsnSac ?? undefined,
+    [ZOHO_TXN.notes]: quotation.notes ?? undefined,
+    [ZOHO_TXN.gstTreatment]: resolveGstTreatment(quotation.customer),
+    [ZOHO_TXN.placeOfSupply]: resolvePlaceOfSupply(quotation.customer),
+    [ZOHO_TXN.isInclusiveTax]: false,
+    [ZOHO_TXN.lineItems]: quotation.items.map((item) => ({
+      [ZOHO_LINE.name]: item.product?.name ?? item.description,
+      [ZOHO_LINE.description]: item.description,
+      [ZOHO_LINE.rate]: Number(item.unitPrice),
+      [ZOHO_LINE.quantity]: Number(item.quantity),
+      [ZOHO_LINE.discount]: Number(item.discount),
+      [ZOHO_LINE.taxPercentage]: taxIdForPercent(Number(item.taxPercent)),
+      [ZOHO_LINE.hsnOrSac]: item.product?.hsnSac ?? undefined,
     })),
   };
 }

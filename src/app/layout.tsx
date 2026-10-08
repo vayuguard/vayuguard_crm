@@ -16,11 +16,16 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "VayuGuard CRM",
-    template: "%s · VayuGuard CRM",
+    default: "VayuCrm",
+    template: "%s · VayuCrm",
   },
   description:
-    "VayuGuard CRM — sales, customers, pipeline, and operations in one place.",
+    "VayuCrm by vayuguard — sales, customers, pipeline, and operations in one place.",
+  icons: {
+    icon: [{ url: "/vayuCrm.png", type: "image/png" }],
+    shortcut: "/vayuCrm.png",
+    apple: "/vayuCrm.png",
+  },
 };
 
 export default function RootLayout({

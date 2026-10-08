@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, Wind } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "@/lib/navigation";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useUiStore } from "@/stores/ui-store";
+import { BrandMark } from "@/components/brand/brand-mark";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -139,23 +140,9 @@ export function Sidebar() {
         <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-3">
           <Link
             href="/dashboard"
-            className="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden"
+            className="flex min-w-0 flex-1 items-center overflow-hidden"
           >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <Wind className="size-4" />
-            </span>
-            <AnimatePresence initial={false}>
-              {!sidebarCollapsed ? (
-                <motion.span
-                  initial={{ opacity: 0, x: -6 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -6 }}
-                  className="truncate text-sm font-semibold tracking-tight"
-                >
-                  VayuGuard
-                </motion.span>
-              ) : null}
-            </AnimatePresence>
+            <BrandMark showText={!sidebarCollapsed} size={32} />
           </Link>
           <Button
             variant="ghost"
@@ -178,7 +165,7 @@ export function Sidebar() {
         {!sidebarCollapsed ? (
           <div className="border-t border-sidebar-border p-3">
             <p className="px-1 text-[11px] text-muted-foreground">
-              VayuGuard CRM · v0.1
+              VayuCrm · by vayuguard
             </p>
           </div>
         ) : null}
@@ -199,11 +186,8 @@ export function MobileNav() {
         className="w-[min(100%,20rem)] gap-0 bg-sidebar p-0 text-sidebar-foreground md:hidden"
       >
         <SheetHeader className="border-b border-sidebar-border px-4 py-3">
-          <SheetTitle className="flex items-center gap-2.5 text-sidebar-foreground">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <Wind className="size-4" />
-            </span>
-            VayuGuard
+          <SheetTitle className="text-sidebar-foreground">
+            <BrandMark size={32} />
           </SheetTitle>
         </SheetHeader>
         <div className="h-[calc(100svh-3.5rem)] overflow-y-auto overscroll-contain px-2 py-3">

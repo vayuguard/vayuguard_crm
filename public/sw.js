@@ -1,4 +1,4 @@
-/* VayuGuard CRM service worker — shows Web Push alerts when the site is closed. */
+/* VayuCrm service worker — shows Web Push alerts when the site is closed. */
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -10,7 +10,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("push", (event) => {
   let data = {
-    title: "VayuGuard CRM",
+    title: "VayuCrm",
     body: "You have a new notification",
     url: "/",
     tag: "vayuguard",
@@ -31,8 +31,8 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: "/icon-192.svg",
-      badge: "/icon-192.svg",
+      icon: "/vayuCrm.png",
+      badge: "/vayuCrm.png",
       tag: data.tag,
       data: { url: data.url || "/" },
       renotify: true,

@@ -1,6 +1,7 @@
 import { ZohoEntityType } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { createCustomerPayment } from "@/server/integrations/zoho/client";
+import { isZohoOutboundEnabled } from "@/server/integrations/zoho/config";
 import { isZohoSyncEnabled } from "@/server/integrations/zoho/sync-enabled";
 import { mapPaymentToZoho } from "@/server/integrations/zoho/mappers/payment";
 import { syncInvoiceToZoho } from "@/server/integrations/zoho/jobs/sync-invoice";
@@ -14,6 +15,9 @@ export async function syncPaymentToZoho(
   paymentId: string,
   opts?: { force?: boolean },
 ) {
+  if (!isZohoOutboundEnabled()) {
+    return { skipped: true as const, reason: "outbound_disabled" as const };
+  }
   if (!opts?.force && !(await isZohoSyncEnabled())) {
     return { skipped: true as const };
   }

@@ -5,11 +5,44 @@ import {
   resolveGstTreatment,
   resolvePlaceOfSupply,
 } from "@/server/integrations/zoho/mappers/gst";
-import { mapCustomerToZohoContact } from "@/server/integrations/zoho/mappers/customer";
-import { mapPaymentToZoho } from "@/server/integrations/zoho/mappers/payment";
+import {
+  mapCustomerToZohoContact,
+  mapZohoContactToCustomer,
+} from "@/server/integrations/zoho/mappers/customer";
+import {
+  mapPaymentToZoho,
+  mapZohoPaymentToCrm,
+} from "@/server/integrations/zoho/mappers/payment";
+import { mapZohoInvoiceToCrm } from "@/server/integrations/zoho/mappers/invoice";
 import { redactSecrets } from "@/server/integrations/zoho/redact";
 import { ZohoValidationError } from "@/server/integrations/zoho/errors";
-import { getZohoAccountsBaseUrl, getZohoBooksBaseUrl } from "@/server/integrations/zoho/config";
+import {
+  getZohoAccountsBaseUrl,
+  getZohoBooksBaseUrl,
+} from "@/server/integrations/zoho/config";
+import { toZohoPaymentMode } from "@/server/integrations/zoho/fields";
+
+const baseCustomer = {
+  id: "c1",
+  name: "Acme",
+  legalName: "Acme Pvt Ltd",
+  email: "a@acme.test",
+  phone: "999",
+  website: null as string | null,
+  gstNumber: "27AABCU9603R1ZM",
+  gstTreatment: null as string | null,
+  placeOfSupply: null as string | null,
+  billingAddress: "1 Main",
+  billingCity: "Pune",
+  billingState: "Maharashtra",
+  billingCountry: "India",
+  billingPinCode: "411001",
+  shippingAddress: null as string | null,
+  shippingCity: null as string | null,
+  shippingState: null as string | null,
+  shippingCountry: null as string | null,
+  shippingPinCode: null as string | null,
+};
 
 describe("zoho gst helpers", () => {
   it("validates GSTIN format", () => {
@@ -19,73 +52,74 @@ describe("zoho gst helpers", () => {
     expect(() => assertValidGstin("INVALID")).toThrow(ZohoValidationError);
   });
 
-  it("resolves gst treatment and place of supply", () => {
+  it("resolves gst treatment and alphabetic place codes", () => {
     expect(resolveGstTreatment({ gstNumber: "27AABCU9603R1ZM" })).toBe(
       "business_gst",
     );
     expect(resolveGstTreatment({})).toBe("consumer");
-    expect(
-      resolvePlaceOfSupply({ billingState: "Maharashtra" }),
-    ).toBe("27");
-    expect(
-      resolvePlaceOfSupply({ gstNumber: "29AABCU9603R1ZM" }),
-    ).toBe("29");
+    expect(resolvePlaceOfSupply({ billingState: "Maharashtra" })).toBe("MH");
+    expect(resolvePlaceOfSupply({ gstNumber: "29AABCU9603R1ZM" })).toBe("KA");
+    expect(resolvePlaceOfSupply({ placeOfSupply: "TN" })).toBe("TN");
+    expect(resolvePlaceOfSupply({ placeOfSupply: "27" })).toBe("MH");
   });
 });
 
 describe("zoho mappers", () => {
-  it("maps customer to contact", () => {
-    const payload = mapCustomerToZohoContact({
-      id: "c1",
-      name: "Acme",
-      legalName: "Acme Pvt Ltd",
-      email: "a@acme.test",
-      phone: "999",
-      gstNumber: "27AABCU9603R1ZM",
-      gstTreatment: null,
-      placeOfSupply: null,
-      billingAddress: "1 Main",
-      billingCity: "Pune",
-      billingState: "Maharashtra",
-      billingCountry: "India",
-      billingPinCode: "411001",
-      shippingAddress: null,
-      shippingCity: null,
-      shippingState: null,
-      shippingCountry: null,
-      shippingPinCode: null,
-    });
+  it("maps customer to Zoho contact with place_of_contact (not place_of_supply)", () => {
+    const payload = mapCustomerToZohoContact(baseCustomer);
     expect(payload.contact_type).toBe("customer");
     expect(payload.gst_treatment).toBe("business_gst");
-    expect(payload.place_of_supply).toBe("27");
+    expect(payload.gst_no).toBe("27AABCU9603R1ZM");
+    expect(payload.place_of_contact).toBe("MH");
+    expect(
+      (payload as { place_of_supply?: string }).place_of_supply,
+    ).toBeUndefined();
+    expect(payload.contact_persons?.[0]?.email).toBe("a@acme.test");
+    expect(payload.billing_address?.zip).toBe("411001");
+  });
+
+  it("maps Zoho contact back to CRM customer fields", () => {
+    const crm = mapZohoContactToCustomer({
+      contact_name: "Acme",
+      company_name: "Acme Pvt Ltd",
+      gst_no: "27AABCU9603R1ZM",
+      gst_treatment: "business_gst",
+      place_of_contact: "MH",
+      email: "a@acme.test",
+      billing_address: {
+        address: "1 Main",
+        city: "Pune",
+        state: "Maharashtra",
+        country: "India",
+        zip: "411001",
+      },
+      contact_persons: [
+        {
+          first_name: "Will",
+          last_name: "Smith",
+          email: "will@acme.test",
+          is_primary_contact: true,
+        },
+      ],
+    });
+    expect(crm.name).toBe("Acme");
+    expect(crm.placeOfSupply).toBe("MH");
+    expect(crm.gstNumber).toBe("27AABCU9603R1ZM");
+    expect(crm.billingPinCode).toBe("411001");
+    expect(crm.email).toBe("a@acme.test");
   });
 
   it("rejects blank customer name", () => {
     expect(() =>
-      mapCustomerToZohoContact({
-        id: "c1",
-        name: "  ",
-        legalName: null,
-        email: null,
-        phone: null,
-        gstNumber: null,
-        gstTreatment: null,
-        placeOfSupply: null,
-        billingAddress: null,
-        billingCity: null,
-        billingState: null,
-        billingCountry: null,
-        billingPinCode: null,
-        shippingAddress: null,
-        shippingCity: null,
-        shippingState: null,
-        shippingCountry: null,
-        shippingPinCode: null,
-      }),
+      mapCustomerToZohoContact({ ...baseCustomer, name: "  " }),
     ).toThrow(ZohoValidationError);
   });
 
-  it("maps payment applied to invoice", () => {
+  it("normalizes payment_mode and maps payment applied to invoice", () => {
+    expect(toZohoPaymentMode("upi")).toBe("others");
+    expect(toZohoPaymentMode("NEFT")).toBe("banktransfer");
+    expect(toZohoPaymentMode("Credit Card")).toBe("creditcard");
+
     const payload = mapPaymentToZoho(
       {
         id: "p1",
@@ -105,6 +139,35 @@ describe("zoho mappers", () => {
     );
     expect(payload.invoices[0]?.invoice_id).toBe("zoho-i");
     expect(payload.amount).toBe(100);
+    expect(payload.payment_mode).toBe("others");
+
+    const back = mapZohoPaymentToCrm({
+      amount: 100,
+      payment_mode: "banktransfer",
+      reference_number: "R1",
+      description: "note",
+      date: "2026-01-15",
+    });
+    expect(back.method).toBe("bank transfer");
+    expect(back.reference).toBe("R1");
+  });
+
+  it("maps Zoho invoice payment status fields", () => {
+    const paid = mapZohoInvoiceToCrm({
+      invoice_number: "INV-1",
+      total: 1000,
+      balance: 0,
+    });
+    expect(paid.paymentStatus).toBe("PAID");
+    expect(paid.amountPaid).toBe(1000);
+
+    const partial = mapZohoInvoiceToCrm({
+      invoice_number: "INV-2",
+      total: 1000,
+      balance: 400,
+    });
+    expect(partial.paymentStatus).toBe("PARTIAL");
+    expect(partial.amountPaid).toBe(600);
   });
 });
 

@@ -10,7 +10,7 @@ import {
   optionalUrl,
 } from "@/lib/validators/common";
 import { nextCustomerNumber } from "@/server/services/leads.service";
-import { queueCustomerSync } from "@/server/integrations/zoho/triggers";
+import { pickColumn } from "@/server/lib/excel";
 
 export const createCustomerSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -199,7 +199,6 @@ export async function createCustomer(
     },
     include: customerInclude,
   });
-  void queueCustomerSync(customer.id).catch(() => undefined);
   return customer;
 }
 
@@ -218,7 +217,6 @@ export async function updateCustomer(
     data: { ...input, updatedById: userId },
     include: customerInclude,
   });
-  void queueCustomerSync(customer.id).catch(() => undefined);
   return customer;
 }
 
@@ -232,4 +230,174 @@ export async function deleteCustomer(id: string, userId: string) {
     where: { id },
     data: { deletedAt: new Date(), updatedById: userId },
   });
+}
+
+/** Stable Excel headers — export and import use the exact same columns. */
+export const CUSTOMER_EXCEL_HEADERS = [
+  "customerNumber",
+  "name",
+  "legalName",
+  "industry",
+  "website",
+  "email",
+  "phone",
+  "gstNumber",
+  "panNumber",
+  "gstTreatment",
+  "placeOfSupply",
+  "billingAddress",
+  "billingCity",
+  "billingState",
+  "billingCountry",
+  "billingPinCode",
+  "shippingAddress",
+  "shippingCity",
+  "shippingState",
+  "shippingCountry",
+  "shippingPinCode",
+  "notes",
+] as const;
+
+export type CustomerExcelRow = Record<
+  (typeof CUSTOMER_EXCEL_HEADERS)[number],
+  string
+>;
+
+export async function exportCustomers(
+  filters: CustomerFilters = {},
+  q?: string,
+): Promise<CustomerExcelRow[]> {
+  const where = buildWhere(filters, q);
+  const customers = await prisma.customer.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    take: 10_000,
+  });
+
+  return customers.map((c) => ({
+    customerNumber: c.customerNumber,
+    name: c.name,
+    legalName: c.legalName ?? "",
+    industry: c.industry ?? "",
+    website: c.website ?? "",
+    email: c.email ?? "",
+    phone: c.phone ?? "",
+    gstNumber: c.gstNumber ?? "",
+    panNumber: c.panNumber ?? "",
+    gstTreatment: c.gstTreatment ?? "",
+    placeOfSupply: c.placeOfSupply ?? "",
+    billingAddress: c.billingAddress ?? "",
+    billingCity: c.billingCity ?? "",
+    billingState: c.billingState ?? "",
+    billingCountry: c.billingCountry ?? "",
+    billingPinCode: c.billingPinCode ?? "",
+    shippingAddress: c.shippingAddress ?? "",
+    shippingCity: c.shippingCity ?? "",
+    shippingState: c.shippingState ?? "",
+    shippingCountry: c.shippingCountry ?? "",
+    shippingPinCode: c.shippingPinCode ?? "",
+    notes: c.notes ?? "",
+  }));
+}
+
+function nullIfEmpty(value: string | undefined | null) {
+  const v = value?.trim();
+  return v ? v : null;
+}
+
+export async function importCustomersFromRows(
+  rows: Array<Record<string, string>>,
+  userId: string,
+) {
+  const results = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [] as { row: number; message: string }[],
+  };
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const name = pickColumn(row, "name");
+    // Skip blank template rows
+    if (!name && !pickColumn(row, "customerNumber", "email", "gstNumber")) {
+      results.skipped += 1;
+      continue;
+    }
+    if (!name) {
+      results.skipped += 1;
+      results.errors.push({ row: i + 2, message: "name is required" });
+      continue;
+    }
+
+    try {
+      const customerNumber = pickColumn(row, "customerNumber");
+      const email = nullIfEmpty(pickColumn(row, "email"));
+      const gstNumber = nullIfEmpty(pickColumn(row, "gstNumber"));
+
+      const data = {
+        name,
+        legalName: nullIfEmpty(pickColumn(row, "legalName")),
+        industry: nullIfEmpty(pickColumn(row, "industry")),
+        website: nullIfEmpty(pickColumn(row, "website")),
+        email,
+        phone: nullIfEmpty(pickColumn(row, "phone")),
+        gstNumber,
+        panNumber: nullIfEmpty(pickColumn(row, "panNumber")),
+        gstTreatment: nullIfEmpty(pickColumn(row, "gstTreatment")),
+        placeOfSupply: nullIfEmpty(pickColumn(row, "placeOfSupply")),
+        billingAddress: nullIfEmpty(pickColumn(row, "billingAddress")),
+        billingCity: nullIfEmpty(pickColumn(row, "billingCity")),
+        billingState: nullIfEmpty(pickColumn(row, "billingState")),
+        billingCountry:
+          nullIfEmpty(pickColumn(row, "billingCountry")) ?? "India",
+        billingPinCode: nullIfEmpty(pickColumn(row, "billingPinCode")),
+        shippingAddress: nullIfEmpty(pickColumn(row, "shippingAddress")),
+        shippingCity: nullIfEmpty(pickColumn(row, "shippingCity")),
+        shippingState: nullIfEmpty(pickColumn(row, "shippingState")),
+        shippingCountry: nullIfEmpty(pickColumn(row, "shippingCountry")),
+        shippingPinCode: nullIfEmpty(pickColumn(row, "shippingPinCode")),
+        notes: nullIfEmpty(pickColumn(row, "notes")),
+      };
+
+      let existing = customerNumber
+        ? await prisma.customer.findFirst({
+            where: { customerNumber, deletedAt: null },
+            select: { id: true },
+          })
+        : null;
+
+      if (!existing && email) {
+        existing = await prisma.customer.findFirst({
+          where: { email, deletedAt: null },
+          select: { id: true },
+        });
+      }
+      if (!existing && gstNumber) {
+        existing = await prisma.customer.findFirst({
+          where: { gstNumber, deletedAt: null },
+          select: { id: true },
+        });
+      }
+
+      if (existing) {
+        await prisma.customer.update({
+          where: { id: existing.id },
+          data: { ...data, updatedById: userId },
+        });
+        results.updated += 1;
+      } else {
+        await createCustomer(data, userId);
+        results.created += 1;
+      }
+    } catch (error) {
+      results.skipped += 1;
+      results.errors.push({
+        row: i + 2,
+        message: error instanceof Error ? error.message : "Import failed",
+      });
+    }
+  }
+
+  return results;
 }

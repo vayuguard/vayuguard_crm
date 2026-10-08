@@ -19,14 +19,24 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, unwrapList } from "@/lib/api-client";
 import { formatCurrency } from "@/lib/utils";
+import { usePermissions } from "@/hooks/use-permissions";
 import { Badge } from "@/components/ui/badge";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -65,8 +75,14 @@ type Deal = {
 
 export function PipelineView() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [pipelineId, setPipelineId] = React.useState<string>("");
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [title, setTitle] = React.useState("");
+  const [expectedRevenue, setExpectedRevenue] = React.useState("0");
+  const [stageId, setStageId] = React.useState("");
+  const [customerId, setCustomerId] = React.useState("");
 
   const pipelinesQuery = useQuery({
     queryKey: ["pipelines"],
@@ -100,6 +116,15 @@ export function PipelineView() {
     },
   });
 
+  const customersQuery = useQuery({
+    queryKey: ["customers", "options"],
+    queryFn: async () => {
+      const res = await apiFetch<unknown>("/api/customers?pageSize=100");
+      return unwrapList<{ id: string; name: string }>(res.data);
+    },
+    enabled: createOpen,
+  });
+
   const moveMutation = useMutation({
     mutationFn: async ({ id, stageId }: { id: string; stageId: string }) =>
       apiFetch(`/api/deals/${id}/move`, {
@@ -109,6 +134,35 @@ export function PipelineView() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deals"] });
       toast.success("Deal moved");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!activePipeline?.id) throw new Error("No pipeline selected");
+      const stage =
+        stageId || activePipeline.stages[0]?.id;
+      if (!stage) throw new Error("No stage available");
+      return apiFetch("/api/deals", {
+        method: "POST",
+        body: JSON.stringify({
+          title: title.trim(),
+          pipelineId: activePipeline.id,
+          stageId: stage,
+          customerId: customerId || null,
+          expectedRevenue: Number(expectedRevenue) || 0,
+        }),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Deal created");
+      setCreateOpen(false);
+      setTitle("");
+      setExpectedRevenue("0");
+      setStageId("");
+      setCustomerId("");
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -258,23 +312,36 @@ export function PipelineView() {
 
   return (
     <div className="space-y-4">
-      {pipelines.length > 1 ? (
-        <Select
-          value={activePipeline.id}
-          onValueChange={(v) => v && setPipelineId(v)}
-        >
-          <SelectTrigger className="w-[240px]">
-            <SelectValue placeholder="Pipeline" />
-          </SelectTrigger>
-          <SelectContent>
-            {pipelines.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        {pipelines.length > 1 ? (
+          <Select
+            value={activePipeline.id}
+            onValueChange={(v) => v && setPipelineId(v)}
+          >
+            <SelectTrigger className="w-[240px]">
+              <SelectValue placeholder="Pipeline" />
+            </SelectTrigger>
+            <SelectContent>
+              {pipelines.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+        {can("deals:write") ? (
+          <Button
+            onClick={() => {
+              setStageId(stages[0]?.id ?? "");
+              setCreateOpen(true);
+            }}
+          >
+            <Plus className="size-4" />
+            New deal
+          </Button>
+        ) : null}
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="gap-0 py-0">
@@ -346,9 +413,110 @@ export function PipelineView() {
       {!deals.length && !dealsQuery.isError ? (
         <EmptyState
           title="Pipeline is empty"
-          description="Deals will appear here as cards you can drag between stages."
+          description="Create a deal, then drag cards between stages."
+          action={
+            can("deals:write") ? (
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus className="size-4" />
+                New deal
+              </Button>
+            ) : undefined
+          }
         />
       ) : null}
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-md" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>Create deal</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!title.trim()) {
+                toast.error("Title is required");
+                return;
+              }
+              createMutation.mutate();
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Title *</Label>
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">
+                Expected revenue
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={expectedRevenue}
+                onChange={(e) => setExpectedRevenue(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Stage</Label>
+              <Select
+                value={stageId || stages[0]?.id || ""}
+                onValueChange={(v) => v && setStageId(v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Stage" />
+                </SelectTrigger>
+                <SelectContent>
+                  {stages.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">
+                Customer (optional)
+              </Label>
+              <Select
+                value={customerId || "__none__"}
+                onValueChange={(v) =>
+                  setCustomerId(v === "__none__" ? "" : (v ?? ""))
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Customer" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {(customersQuery.data ?? []).map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border pt-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Creating…" : "Create"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

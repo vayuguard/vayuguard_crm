@@ -1,5 +1,4 @@
 import {
-  PaymentStatus,
   ZohoEntityType,
   ZohoSyncDirection,
   ZohoSyncStatus,
@@ -9,6 +8,13 @@ import { prisma } from "@/server/db/client";
 import { getInvoice } from "@/server/integrations/zoho/client";
 import { redactSecrets } from "@/server/integrations/zoho/redact";
 import { upsertZohoLink } from "@/server/integrations/zoho/queue";
+import { mapZohoInvoiceToCrm } from "@/server/integrations/zoho/mappers/invoice";
+import { applyZohoContactToCrm } from "@/server/integrations/zoho/jobs/apply-contact";
+import {
+  ZOHO_CONTACT,
+  ZOHO_PAYMENT,
+  ZOHO_TXN,
+} from "@/server/integrations/zoho/fields";
 
 type WebhookPayload = {
   event?: string;
@@ -16,8 +22,10 @@ type WebhookPayload = {
   invoice?: Record<string, unknown>;
   payment?: Record<string, unknown>;
   customerpayment?: Record<string, unknown>;
+  contact?: Record<string, unknown>;
   invoice_id?: string;
   payment_id?: string;
+  contact_id?: string;
   [key: string]: unknown;
 };
 
@@ -28,7 +36,7 @@ function parseDate(value: unknown): Date | null {
 }
 
 /**
- * Apply Zoho → CRM webhook payload (invoice / payment events).
+ * Apply Zoho → CRM webhook payload (contact / invoice / payment events).
  * Idempotent via zoho_links + zoho_last_modified comparison.
  */
 export async function processZohoWebhook(payload: WebhookPayload) {
@@ -36,11 +44,16 @@ export async function processZohoWebhook(payload: WebhookPayload) {
     payload.event ?? payload.event_type ?? "",
   ).toLowerCase();
 
-  let handled = "ignored";
+  const handled: string[] = [];
+
+  if (event.includes("contact") || payload.contact || payload.contact_id) {
+    await handleContactEvent(payload);
+    handled.push("contact");
+  }
 
   if (event.includes("invoice") || payload.invoice || payload.invoice_id) {
     await handleInvoiceEvent(payload);
-    handled = "invoice";
+    handled.push("invoice");
   }
 
   if (
@@ -50,26 +63,58 @@ export async function processZohoWebhook(payload: WebhookPayload) {
     payload.payment_id
   ) {
     await handlePaymentEvent(payload);
-    handled = handled === "invoice" ? "invoice+payment" : "payment";
+    handled.push("payment");
   }
 
   await prisma.zohoSyncLog.create({
     data: {
       direction: ZohoSyncDirection.zoho_to_crm,
-      action: `webhook.${handled}`,
+      action: `webhook.${handled.length ? handled.join("+") : "ignored"}`,
       status: ZohoSyncStatus.success,
       requestPayload: redactSecrets(payload) as Prisma.InputJsonValue,
       attempts: 1,
     },
   });
 
-  return { handled };
+  return { handled: handled.length ? handled.join("+") : "ignored" };
+}
+
+async function handleContactEvent(payload: WebhookPayload) {
+  const contact = payload.contact ?? {};
+  const zohoId = String(
+    contact[ZOHO_CONTACT.contactId] ?? payload.contact_id ?? "",
+  );
+  if (!zohoId) return;
+
+  const link = await prisma.zohoLink.findUnique({
+    where: {
+      entityType_zohoId: { entityType: ZohoEntityType.customer, zohoId },
+    },
+  });
+  if (!link) return;
+
+  const modified = parseDate(contact[ZOHO_CONTACT.lastModifiedTime]);
+  if (
+    link.zohoLastModified &&
+    modified &&
+    modified <= link.zohoLastModified
+  ) {
+    return;
+  }
+
+  await applyZohoContactToCrm(zohoId, link.crmId, contact);
+  await upsertZohoLink({
+    entityType: ZohoEntityType.customer,
+    crmId: link.crmId,
+    zohoId,
+    zohoLastModified: modified ?? new Date(),
+  });
 }
 
 async function handleInvoiceEvent(payload: WebhookPayload) {
   const inv = payload.invoice ?? {};
   const zohoId = String(
-    inv.invoice_id ?? payload.invoice_id ?? "",
+    inv[ZOHO_TXN.invoiceId] ?? payload.invoice_id ?? "",
   );
   if (!zohoId) return;
 
@@ -80,7 +125,7 @@ async function handleInvoiceEvent(payload: WebhookPayload) {
   });
   if (!link) return; // unknown invoice — CRM owns creation; ignore
 
-  const modified = parseDate(inv.last_modified_time);
+  const modified = parseDate(inv[ZOHO_TXN.lastModifiedTime]);
   if (
     link.zohoLastModified &&
     modified &&
@@ -89,36 +134,25 @@ async function handleInvoiceEvent(payload: WebhookPayload) {
     return;
   }
 
-  // Prefer full fetch for accurate balance when webhook body is thin
-  let balance = Number(inv.balance ?? NaN);
-  let total = Number(inv.total ?? NaN);
-  let invoiceNumber =
-    typeof inv.invoice_number === "string" ? inv.invoice_number : undefined;
-
+  let zohoInv = inv;
+  const balance = Number(inv[ZOHO_TXN.balance] ?? NaN);
+  const total = Number(inv[ZOHO_TXN.total] ?? NaN);
   if (!Number.isFinite(balance) || !Number.isFinite(total)) {
     try {
       const full = await getInvoice(zohoId);
-      balance = Number(full.invoice.balance ?? 0);
-      total = Number(full.invoice.total ?? 0);
-      if (typeof full.invoice.invoice_number === "string") {
-        invoiceNumber = full.invoice.invoice_number;
-      }
+      zohoInv = full.invoice;
     } catch {
       return;
     }
   }
 
-  const amountPaid = Math.max(0, total - balance);
-  let paymentStatus: PaymentStatus = PaymentStatus.PENDING;
-  if (balance <= 0.01) paymentStatus = PaymentStatus.PAID;
-  else if (amountPaid > 0) paymentStatus = PaymentStatus.PARTIAL;
-
+  const mapped = mapZohoInvoiceToCrm(zohoInv);
   await prisma.invoice.updateMany({
     where: { id: link.crmId, deletedAt: null },
     data: {
-      amountPaid,
-      paymentStatus,
-      ...(invoiceNumber ? { invoiceNumber } : {}),
+      amountPaid: mapped.amountPaid,
+      paymentStatus: mapped.paymentStatus,
+      ...(mapped.invoiceNumber ? { invoiceNumber: mapped.invoiceNumber } : {}),
     },
   });
 
@@ -132,7 +166,9 @@ async function handleInvoiceEvent(payload: WebhookPayload) {
 
 async function handlePaymentEvent(payload: WebhookPayload) {
   const pay = payload.payment ?? payload.customerpayment ?? {};
-  const zohoId = String(pay.payment_id ?? payload.payment_id ?? "");
+  const zohoId = String(
+    pay[ZOHO_PAYMENT.paymentId] ?? payload.payment_id ?? "",
+  );
   if (!zohoId) return;
 
   const existing = await prisma.zohoLink.findUnique({
@@ -141,9 +177,8 @@ async function handlePaymentEvent(payload: WebhookPayload) {
     },
   });
 
-  const modified = parseDate(pay.last_modified_time);
+  const modified = parseDate(pay[ZOHO_PAYMENT.lastModifiedTime]);
 
-  // If we already linked this payment, only refresh timestamp (CRM owns payment create)
   if (existing) {
     if (
       existing.zohoLastModified &&
@@ -162,9 +197,9 @@ async function handlePaymentEvent(payload: WebhookPayload) {
   }
 
   // Payment created in Zoho for a linked invoice — refresh invoice balances
-  const invoices = (pay.invoices as Array<Record<string, unknown>>) ?? [];
+  const invoices = (pay[ZOHO_PAYMENT.invoices] as Array<Record<string, unknown>>) ?? [];
   for (const row of invoices) {
-    const invZohoId = String(row.invoice_id ?? "");
+    const invZohoId = String(row[ZOHO_PAYMENT.invoiceId] ?? "");
     if (!invZohoId) continue;
     await handleInvoiceEvent({
       event: "invoice_updated",

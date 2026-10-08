@@ -90,7 +90,7 @@ function LoginForm() {
         <CardHeader className="space-y-2 pb-2">
           <CardTitle className="text-2xl tracking-tight">Sign in</CardTitle>
           <CardDescription className="text-[15px] leading-relaxed">
-            Access your VayuGuard workspace securely
+            Access your VayuCrm workspace securely
           </CardDescription>
         </CardHeader>
         <form onSubmit={form.handleSubmit(onSubmit)}>

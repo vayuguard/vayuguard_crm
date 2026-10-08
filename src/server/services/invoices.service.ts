@@ -15,10 +15,6 @@ import type {
   InvoiceFilters,
   UpdateInvoiceInput,
 } from "@/lib/validators/invoice";
-import {
-  queueInvoiceSync,
-  queuePaymentSync,
-} from "@/server/integrations/zoho/triggers";
 
 const invoiceInclude = {
   customer: {
@@ -214,8 +210,53 @@ export async function createInvoice(input: CreateInvoiceInput, userId: string) {
     },
     include: invoiceInclude,
   });
-  void queueInvoiceSync(invoice.id).catch(() => undefined);
   return invoice;
+}
+
+/** Copy an approved (or any) quotation into a draft invoice. */
+export async function createInvoiceFromQuotation(
+  quotationId: string,
+  userId: string,
+  options: { dueDate?: Date; notes?: string | null } = {},
+) {
+  const quotation = await prisma.quotation.findFirst({
+    where: { id: quotationId, deletedAt: null },
+    include: { items: true },
+  });
+  if (!quotation) throw notFound("Quotation not found");
+  if (!quotation.customerId) {
+    throw validationError("Quotation has no customer");
+  }
+  if (!quotation.items.length) {
+    throw validationError("Quotation has no line items");
+  }
+
+  const dueDate =
+    options.dueDate ??
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+  return createInvoice(
+    {
+      customerId: quotation.customerId,
+      quotationId: quotation.id,
+      status: InvoiceStatus.DRAFT,
+      dueDate,
+      discountAmount: Number(quotation.discountAmount),
+      notes:
+        options.notes ??
+        quotation.notes ??
+        `From quotation ${quotation.quoteNumber}`,
+      items: quotation.items.map((item) => ({
+        productId: item.productId ?? undefined,
+        description: item.description,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unitPrice),
+        taxPercent: Number(item.taxPercent),
+        discount: Number(item.discount),
+      })),
+    },
+    userId,
+  );
 }
 
 export async function updateInvoice(
@@ -292,7 +333,6 @@ export async function updateInvoice(
       },
       include: invoiceInclude,
     });
-    void queueInvoiceSync(id).catch(() => undefined);
     return updated;
   });
 }
@@ -364,7 +404,6 @@ export async function recordPayment(
 
     return { payment, invoice: updatedInvoice };
   });
-  void queuePaymentSync(result.payment.id).catch(() => undefined);
   return result;
 }
 

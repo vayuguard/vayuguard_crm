@@ -4,13 +4,15 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil } from "lucide-react";
+import { ArrowLeft, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { usePermissions } from "@/hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -151,6 +153,11 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const [editOpen, setEditOpen] = React.useState(false);
+  const [contactOpen, setContactOpen] = React.useState(false);
+  const [contactName, setContactName] = React.useState("");
+  const [contactEmail, setContactEmail] = React.useState("");
+  const [contactPhone, setContactPhone] = React.useState("");
+  const [contactDesignation, setContactDesignation] = React.useState("");
 
   const query = useQuery({
     queryKey: ["customers", customerId],
@@ -170,6 +177,31 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
       toast.success("Customer updated");
       setEditOpen(false);
       queryClient.invalidateQueries({ queryKey: ["customers"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const addContactMutation = useMutation({
+    mutationFn: async () =>
+      apiFetch("/api/contacts", {
+        method: "POST",
+        body: JSON.stringify({
+          name: contactName.trim(),
+          email: contactEmail.trim() || null,
+          phone: contactPhone.trim() || null,
+          designation: contactDesignation.trim() || null,
+          customerId,
+        }),
+      }),
+    onSuccess: () => {
+      toast.success("Contact added");
+      setContactOpen(false);
+      setContactName("");
+      setContactEmail("");
+      setContactPhone("");
+      setContactDesignation("");
+      queryClient.invalidateQueries({ queryKey: ["customers", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -373,6 +405,14 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
         </TabsContent>
 
         <TabsContent value="contacts" className="mt-4 space-y-2">
+          {can("contacts:write") ? (
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => setContactOpen(true)}>
+                <Plus className="size-3.5" />
+                Add contact
+              </Button>
+            </div>
+          ) : null}
           <EmptyOrList
             items={c.contacts}
             empty="No contacts linked."
@@ -587,6 +627,68 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
               await updateMutation.mutateAsync(values);
             }}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={contactOpen} onOpenChange={setContactOpen}>
+        <DialogContent className="sm:max-w-md" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>Add contact</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!contactName.trim()) {
+                toast.error("Name is required");
+                return;
+              }
+              addContactMutation.mutate();
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Name *</Label>
+              <Input
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Designation</Label>
+              <Input
+                value={contactDesignation}
+                onChange={(e) => setContactDesignation(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Email</Label>
+              <Input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Phone</Label>
+              <Input
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border pt-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setContactOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={addContactMutation.isPending}>
+                {addContactMutation.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

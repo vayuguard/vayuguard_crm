@@ -1,5 +1,12 @@
 import type { Payment } from "@prisma/client";
 import { ZohoValidationError } from "@/server/integrations/zoho/errors";
+import {
+  ZOHO_PAYMENT,
+  fromZohoPaymentMode,
+  num,
+  str,
+  toZohoPaymentMode,
+} from "@/server/integrations/zoho/fields";
 
 export function mapPaymentToZoho(
   payment: Payment,
@@ -11,17 +18,29 @@ export function mapPaymentToZoho(
   }
 
   return {
-    customer_id: zohoCustomerId,
-    payment_mode: payment.method || "cash",
-    amount: Number(payment.amount),
-    date: payment.paidAt.toISOString().slice(0, 10),
-    reference_number: payment.reference ?? payment.paymentNumber,
-    description: payment.notes ?? undefined,
-    invoices: [
+    [ZOHO_PAYMENT.customerId]: zohoCustomerId,
+    [ZOHO_PAYMENT.paymentMode]: toZohoPaymentMode(payment.method),
+    [ZOHO_PAYMENT.amount]: Number(payment.amount),
+    [ZOHO_PAYMENT.date]: payment.paidAt.toISOString().slice(0, 10),
+    [ZOHO_PAYMENT.referenceNumber]:
+      payment.reference ?? payment.paymentNumber,
+    [ZOHO_PAYMENT.description]: payment.notes ?? undefined,
+    [ZOHO_PAYMENT.invoices]: [
       {
-        invoice_id: zohoInvoiceId,
-        amount_applied: Number(payment.amount),
+        [ZOHO_PAYMENT.invoiceId]: zohoInvoiceId,
+        [ZOHO_PAYMENT.amountApplied]: Number(payment.amount),
       },
     ],
+  };
+}
+
+/** Zoho customerpayment → CRM Payment patch (for linked records). */
+export function mapZohoPaymentToCrm(zoho: Record<string, unknown>) {
+  return {
+    amount: num(zoho[ZOHO_PAYMENT.amount]),
+    method: fromZohoPaymentMode(str(zoho[ZOHO_PAYMENT.paymentMode])),
+    reference: str(zoho[ZOHO_PAYMENT.referenceNumber]),
+    notes: str(zoho[ZOHO_PAYMENT.description]),
+    paidAt: str(zoho[ZOHO_PAYMENT.date]),
   };
 }

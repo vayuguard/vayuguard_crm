@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
 
     if (format === "pdf") {
       const lines = [
-        `VayuGuard CRM Report: ${report.type}`,
+        `VayuCrm Report: ${report.type}`,
         `Exported: ${report.exportedAt}`,
         "",
         "Summary",

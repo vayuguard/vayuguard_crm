@@ -33,7 +33,11 @@ type ZohoStatus = {
     action: string;
     errorMessage?: string | null;
   } | null;
-  pollCursors: { invoices: string | null; payments: string | null };
+  pollCursors: {
+    contacts: string | null;
+    invoices: string | null;
+    payments: string | null;
+  };
   failedJobs: Array<{
     id: string;
     jobType: string;
@@ -104,8 +108,8 @@ export function ZohoSyncView() {
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Zoho Books</h2>
           <p className="text-sm text-muted-foreground">
-            CRM owns customers and invoice creation. Zoho owns payment status and
-            tax calculation. Sync runs only via the background worker.
+            Inbound only: data flows Zoho → CRM. Nothing you enter in this CRM
+            is sent to Zoho. Pulls are rate-limited to avoid API outages.
           </p>
         </div>
         <Button
@@ -147,10 +151,10 @@ export function ZohoSyncView() {
           <Separator />
           <div className="flex items-center justify-between gap-3">
             <div>
-              <Label htmlFor="zoho-sync-toggle">Sync enabled</Label>
+              <Label htmlFor="zoho-sync-toggle">Pull enabled</Label>
               <p className="text-xs text-muted-foreground">
-                Env default: {s.syncEnabledEnv ? "true" : "false"}. Admin toggle
-                overrides via DB.
+                Env default: {s.syncEnabledEnv ? "true" : "false"}. When on,
+                webhooks + scheduled pulls update CRM from Zoho.
               </p>
             </div>
             <Switch
@@ -197,6 +201,10 @@ export function ZohoSyncView() {
                 ? `${s.lastError.action}: ${s.lastError.errorMessage ?? "error"}`
                 : "—"
             }
+          />
+          <Detail
+            label="Contact poll cursor"
+            value={s.pollCursors.contacts ?? "—"}
           />
           <Detail
             label="Invoice poll cursor"

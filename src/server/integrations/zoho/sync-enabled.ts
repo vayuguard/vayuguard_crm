@@ -1,8 +1,9 @@
 import { prisma } from "@/server/db/client";
 
 /**
- * Effective sync flag: DB override (admin UI) wins over env.
+ * Effective pull flag: DB override (admin UI) wins over env.
  * Env ZOHO_SYNC_ENABLED defaults to false.
+ * When enabled, only Zoho → CRM pull/webhooks run (never CRM → Zoho).
  */
 export async function isZohoSyncEnabled(): Promise<boolean> {
   try {

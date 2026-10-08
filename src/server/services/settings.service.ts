@@ -42,7 +42,7 @@ export async function getCompanySettings() {
   if (existing) return existing;
 
   return prisma.companySettings.create({
-    data: { companyName: "VayuGuard" },
+    data: { companyName: "VayuCrm" },
   });
 }
 

@@ -10,8 +10,10 @@ import {
   FileText,
   Mail,
   Plus,
+  Receipt,
   Trash2,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { apiFetch, unwrapList } from "@/lib/api-client";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
@@ -160,6 +162,7 @@ function toPayload(values: QuotationFormValues) {
 }
 
 export function QuotationsView() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const [search, setSearch] = React.useState("");
@@ -266,6 +269,22 @@ export function QuotationsView() {
       toast.success("Quotation emailed");
       setEmailOpen(false);
       queryClient.invalidateQueries({ queryKey: ["quotations"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const toInvoiceMutation = useMutation({
+    mutationFn: async (id: string) =>
+      apiFetch<{ id: string }>(`/api/quotations/${id}/invoice`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onSuccess: () => {
+      toast.success("Invoice created from quotation");
+      setDetailId(null);
+      queryClient.invalidateQueries({ queryKey: ["quotations"] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      router.push("/invoices");
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -636,6 +655,19 @@ export function QuotationsView() {
                   <Button size="sm" variant="outline" onClick={openEmail}>
                     <Mail className="size-3.5" />
                     Email
+                  </Button>
+                ) : null}
+                {can("invoices:write") ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => toInvoiceMutation.mutate(detail.id)}
+                    disabled={toInvoiceMutation.isPending}
+                  >
+                    <Receipt className="size-3.5" />
+                    {toInvoiceMutation.isPending
+                      ? "Creating…"
+                      : "Create invoice"}
                   </Button>
                 ) : null}
                 <Button

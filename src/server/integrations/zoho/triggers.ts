@@ -1,21 +1,24 @@
 import { enqueueZohoJob } from "@/server/integrations/zoho/queue";
 
-/** Fire-and-forget enqueue helpers — never call Zoho in the request path. */
+/**
+ * Inbound-only: CRM never pushes records to Zoho.
+ * Outbound helpers are intentional no-ops so service call sites stay safe.
+ */
 
-export function queueCustomerSync(customerId: string) {
-  return enqueueZohoJob("sync_customer", { customerId });
+export async function queueCustomerSync(_customerId: string) {
+  return null;
 }
 
-export function queueQuotationSync(quotationId: string) {
-  return enqueueZohoJob("sync_quotation", { quotationId });
+export async function queueQuotationSync(_quotationId: string) {
+  return null;
 }
 
-export function queueInvoiceSync(invoiceId: string) {
-  return enqueueZohoJob("sync_invoice", { invoiceId });
+export async function queueInvoiceSync(_invoiceId: string) {
+  return null;
 }
 
-export function queuePaymentSync(paymentId: string) {
-  return enqueueZohoJob("sync_payment", { paymentId });
+export async function queuePaymentSync(_paymentId: string) {
+  return null;
 }
 
 export function queuePullUpdates() {

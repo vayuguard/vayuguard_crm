@@ -79,7 +79,7 @@ export async function GET() {
   return ok({
     openapi: "3.0.3",
     info: {
-      title: "VayuGuard CRM API",
+      title: "VayuCrm API",
       version: "0.2.0",
       description:
         "OpenAPI listing of major CRM API paths including tasks, todo-lists, calendar, communications, and report exports.",

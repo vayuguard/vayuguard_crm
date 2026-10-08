@@ -81,6 +81,7 @@ export async function GET() {
       lastSuccess,
       lastError,
       pollCursors: {
+        contacts: await getSyncState("contacts_last_modified"),
         invoices: await getSyncState("invoices_last_modified"),
         payments: await getSyncState("payments_last_modified"),
       },

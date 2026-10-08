@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Wind } from "lucide-react";
+import { BrandMark } from "@/components/brand/brand-mark";
 
 export default function AuthLayout({
   children,
@@ -32,14 +32,9 @@ export default function AuthLayout({
       >
         <Link
           href="/login"
-          className="group flex items-center gap-3 text-foreground"
+          className="group text-foreground transition-transform duration-300 hover:scale-[1.02]"
         >
-          <span className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-teal-700/25 transition-transform duration-300 group-hover:scale-105">
-            <Wind className="size-5" />
-          </span>
-          <span className="text-3xl font-semibold tracking-tight">
-            VayuGuard
-          </span>
+          <BrandMark size={48} titleClassName="text-3xl" />
         </Link>
         <p className="max-w-sm text-center text-sm text-muted-foreground">
           CRM for modern sales & operations teams

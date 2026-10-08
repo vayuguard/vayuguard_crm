@@ -49,15 +49,11 @@ export function ZohoSyncBadge({
     mutationFn: async () => {
       await apiFetch("/api/zoho/actions", {
         method: "POST",
-        body: JSON.stringify({
-          action: "sync_now",
-          entityType,
-          crmId,
-        }),
+        body: JSON.stringify({ action: "pull_now" }),
       });
     },
     onSuccess: () => {
-      toast.success("Sync queued");
+      toast.success("Pull from Zoho queued");
       void qc.invalidateQueries({ queryKey: ["zoho-link", entityType, crmId] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -68,7 +64,7 @@ export function ZohoSyncBadge({
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-      <span className="text-xs text-muted-foreground">Zoho</span>
+      <span className="text-xs text-muted-foreground">Zoho (inbound)</span>
       {link ? (
         <Badge variant="secondary">Linked · {link.zohoId.slice(-8)}</Badge>
       ) : (
@@ -76,12 +72,12 @@ export function ZohoSyncBadge({
       )}
       {link?.lastSyncedAt ? (
         <span className="text-xs text-muted-foreground">
-          Synced {formatDate(link.lastSyncedAt)}
+          Pulled {formatDate(link.lastSyncedAt)}
         </span>
       ) : null}
       {lastLog?.status === "failed" ? (
         <span className="text-xs text-destructive">
-          {lastLog.errorMessage ?? "Last sync failed"}
+          {lastLog.errorMessage ?? "Last pull failed"}
         </span>
       ) : null}
       {canSync ? (
@@ -92,7 +88,7 @@ export function ZohoSyncBadge({
           onClick={() => syncNow.mutate()}
         >
           <RefreshCw className="size-3.5" />
-          Sync now
+          Pull from Zoho
         </Button>
       ) : null}
     </div>

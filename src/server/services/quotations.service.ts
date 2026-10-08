@@ -10,7 +10,6 @@ import type {
   QuotationItemInput,
   UpdateQuotationInput,
 } from "@/lib/validators/quotation";
-import { queueQuotationSync } from "@/server/integrations/zoho/triggers";
 
 const quotationInclude = {
   customer: { select: { id: true, name: true, customerNumber: true, email: true } },
@@ -173,7 +172,6 @@ export async function createQuotation(
     },
     include: quotationInclude,
   });
-  void queueQuotationSync(quotation.id).catch(() => undefined);
   return quotation;
 }
 
@@ -254,7 +252,6 @@ export async function updateQuotation(
       });
     }
 
-    void queueQuotationSync(id).catch(() => undefined);
     return updated;
   });
 }
@@ -339,7 +336,7 @@ export async function emailQuotation(
   const quotation = await getQuotationById(id);
   const payload = await getQuotationPdfPayload(id);
   const subject =
-    input.subject ?? `Quotation ${quotation.quoteNumber} from VayuGuard`;
+    input.subject ?? `Quotation ${quotation.quoteNumber} from VayuCrm`;
 
   const result = await emailProvider.send({
     to: input.to,

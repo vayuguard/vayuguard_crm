@@ -1,6 +1,10 @@
 # Zoho Books ↔ VayuGuard CRM Integration
 
-End-to-end integration so CRM customers, quotations (estimates), invoices, and payments sync with Zoho Books. Designed for India GST orgs, background-only Zoho calls, and safe defaults (`ZOHO_SYNC_ENABLED=false`).
+End-to-end **inbound** integration: Zoho Books data is pulled into VayuGuard CRM.
+**CRM data is never written to Zoho** (`ZOHO_OUTBOUND_ENABLED=false`).
+
+Designed for India GST orgs, background-only Zoho **reads**, and safe defaults
+(`ZOHO_SYNC_ENABLED=false` until you turn pull on).
 
 ---
 
@@ -24,11 +28,12 @@ flowchart LR
 
 | Concern | Owner |
 |---|---|
-| Customer create/update, invoice create | CRM |
-| Payment status / balance / tax calculation | Zoho |
-| Id mapping | `ZohoLink` |
-| Runtime sync on/off | Env + DB override (`sync_enabled`) |
+| Source of truth for accounting contacts / invoices / payments | Zoho Books |
+| CRM local edits | Stay in CRM only — **not pushed to Zoho** |
+| Id mapping for inbound updates | `ZohoLink` |
+| Pull on/off | Env + DB override (`sync_enabled`) |
 
+Rate-limit protection: default **40 req/min**, **300ms** gap between calls, max **3 pages** per entity per pull, and a **60s cooldown** after HTTP 429.
 ---
 
 ## 2. Project findings
@@ -104,41 +109,69 @@ scripts/zoho-*.ts     # CLI: worker, poll, exchange, test, migrate
 
 ---
 
-## 5. Mapping table (CRM → Zoho)
+## 5. Mapping table (CRM ↔ Zoho)
+
+| CRM | Zoho Books | Sync |
+|---|---|---|
+| Customer | Contact (`contact_type: customer`) | both ways (linked only inbound) |
+| Contact (person) | `contact_persons[]` | outbound primary + inbound refresh |
+| Lead | — | **not synced** (Zoho Books has no Leads) |
+| Quotation | Estimate | CRM → Zoho |
+| Invoice + lines | Invoice | CRM → Zoho; Zoho owns balance/payment status inbound |
+| Payment | Customer Payment | CRM → Zoho; linked payments refresh inbound |
+
+Shared field constants: `src/server/integrations/zoho/fields.ts`.
+
+### Customer ↔ Contact
 
 | CRM | Zoho Books |
 |---|---|
-| Customer | Contact (`contact_type: customer`) |
-| Quotation | Estimate |
-| Invoice + lines | Invoice |
-| Payment | Customer Payment (applied to invoice) |
+| name | `contact_name` |
+| legalName | `company_name` |
+| email / phone | `email` / `phone` + primary `contact_persons[]` |
+| website | `website` |
+| gstNumber | `gst_no` |
+| gstTreatment | `gst_treatment` |
+| placeOfSupply | **`place_of_contact`** (alphabetic: `MH`, `TN`…) |
+| billing* / shipping* | `billing_address` / `shipping_address` (`address`, `city`, `state`, `zip`, `country`) |
 
-### Customer fields
+### Contact (person) ↔ contact_persons
+
+Zoho Books **Contact** = company → CRM **Customer**.  
+Zoho **contact_persons[]** = people → CRM **Contact**.
+
+| CRM Contact | Zoho `contact_persons[]` | Excel column |
+|---|---|---|
+| name | `first_name` + `last_name` | `name` |
+| email | `email` | `email` |
+| phone | `phone` | `phone` |
+| whatsapp | `mobile` | `whatsapp` |
+| designation | `designation` | `designation` |
+| department | `department` | `department` |
+| customerId (via number/email) | parent Zoho Contact | `customerNumber` / `customerEmail` |
+| relationshipScore | — (CRM-only) | `interest` (`not_interested` / `cold` / `warm` / `interested` / `hot`) |
+| tags, social, notes | — (CRM-only) | same names in Excel |
+
+### Invoice / Estimate / Payment
 
 | CRM | Zoho |
 |---|---|
-| name | contact_name |
-| legalName | company_name |
-| email / phone | email / phone |
-| gstNumber | gst_no |
-| gstTreatment / inferred | gst_treatment |
-| placeOfSupply / state / GSTIN prefix | place_of_supply |
-| billing* / shipping* | billing_address / shipping_address |
-
-### Invoice fields
-
-| CRM | Zoho |
-|---|---|
-| invoiceNumber | invoice_number |
-| issueDate / dueDate | date / due_date |
-| line description, qty, rate, discount, tax% | line_items |
-| product.hsnSac | hsn_or_sac |
+| invoiceNumber / quoteNumber | `invoice_number` / `estimate_number` |
+| issueDate / dueDate / validUntil | `date` / `due_date` / `expiry_date` |
+| customer placeOfSupply | **`place_of_supply`** on transactions |
+| line fields | `line_items` (`rate`, `quantity`, `discount`, `tax_percentage`, `hsn_or_sac`) |
+| amountPaid / paymentStatus | derived from Zoho `total` − `balance` |
+| payment.method | `payment_mode` (`cash`, `check`, `creditcard`, `banktransfer`, …) |
+| payment.reference | `reference_number` |
+| payment.notes / paidAt | `description` / `date` |
+| invoice apply | `invoices[].invoice_id` + `amount_applied` |
 
 ### GST notes
 
 - GSTIN validated as 15-char Indian format when present.
-- Default place of supply falls back to Maharashtra `27` if unknown (**assumption** for VayuGuard India org).
-- Line taxes sent as `tax_percentage` (**assumption**: Zoho org accepts percentage-based lines).
+- Contacts use `place_of_contact`; invoices/estimates use `place_of_supply` — both alphabetic (`MH`, not `27`).
+- Default place code = `MH` when unknown.
+- Line taxes sent as `tax_percentage`.
 
 ---
 
@@ -275,14 +308,15 @@ Worker must run in production whenever sync is enabled.
 
 1. Zoho Books REST paths under `/books/v3` (`/contacts`, `/estimates`, `/invoices`, `/customerpayments`) — official docs were not fetchable (403); paths are standard Books API.
 2. Write APIs use form field `JSONString` (Zoho convention).
-3. Default `place_of_supply` = `27` (Maharashtra) when unresolved.
+3. Default place code = `MH` (Maharashtra) when unresolved; contacts use `place_of_contact`, transactions use `place_of_supply`.
 4. Line tax via `tax_percentage` rather than pre-resolved Zoho tax IDs.
-5. DB-backed queue instead of Redis (project had no queue infra).
-6. Admin sync toggle stored in `ZohoSyncState.sync_enabled` (env alone cannot be toggled from Next.js UI reliably).
-7. Payments are create-only in Zoho (no update).
-8. Unknown Zoho invoices (no `ZohoLink`) are ignored on inbound sync — CRM owns invoice creation.
-9. `scripts/zoho-*.ts` tracked via gitignore exceptions; other `/scripts` remain ignored.
-10. Unit tests mock `fetch` / Prisma; no live Zoho calls in CI.
+5. Leads are CRM-only until converted to a Customer (Zoho Books has no Lead entity).
+6. DB-backed queue instead of Redis (project had no queue infra).
+7. Admin sync toggle stored in `ZohoSyncState.sync_enabled` (env alone cannot be toggled from Next.js UI reliably).
+8. Payments are create-only in Zoho (no update after create).
+9. Unknown Zoho invoices/contacts (no `ZohoLink`) are ignored on inbound sync — CRM owns creation.
+10. `scripts/zoho-*.ts` tracked via gitignore exceptions; other `/scripts` remain ignored.
+11. Unit tests mock `fetch` / Prisma; no live Zoho calls in CI.
 
 ---
 

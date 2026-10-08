@@ -8,13 +8,17 @@ import { prisma } from "@/server/db/client";
 import {
   assertZohoCredentialsConfigured,
   getZohoBooksBaseUrl,
+  isZohoOutboundEnabled,
 } from "@/server/integrations/zoho/config";
 import {
   ZohoApiError,
   ZohoAuthError,
   ZohoRateLimitError,
 } from "@/server/integrations/zoho/errors";
-import { acquireZohoRateSlot } from "@/server/integrations/zoho/rate-limit";
+import {
+  acquireZohoRateSlot,
+  tripZohoRateLimitCooldown,
+} from "@/server/integrations/zoho/rate-limit";
 import { redactSecrets } from "@/server/integrations/zoho/redact";
 import {
   clearCachedAccessToken,
@@ -42,11 +46,12 @@ async function writeSyncLog(input: {
   status: ZohoSyncStatus;
   errorMessage?: string;
   attempts: number;
+  direction: ZohoSyncDirection;
 }) {
   try {
     await prisma.zohoSyncLog.create({
       data: {
-        direction: ZohoSyncDirection.crm_to_zoho,
+        direction: input.direction,
         entityType: input.entityType,
         crmId: input.crmId,
         zohoId: input.zohoId,
@@ -74,6 +79,21 @@ function sleep(ms: number) {
 export async function zohoRequest<T = unknown>(
   options: RequestOptions,
 ): Promise<T> {
+  const method = options.method ?? "GET";
+  const direction =
+    method === "GET"
+      ? ZohoSyncDirection.zoho_to_crm
+      : ZohoSyncDirection.crm_to_zoho;
+
+  // Hard block all write methods unless outbound is explicitly enabled.
+  if (method !== "GET" && !isZohoOutboundEnabled()) {
+    throw new ZohoApiError(
+      "Zoho outbound writes are disabled (inbound-only mode)",
+      403,
+      "ZOHO_OUTBOUND_DISABLED",
+    );
+  }
+
   const cfg = assertZohoCredentialsConfigured();
   const maxRetries = options.maxRetries ?? 4;
   let attempts = 0;
@@ -92,14 +112,12 @@ export async function zohoRequest<T = unknown>(
       }
     }
 
-    const method = options.method ?? "GET";
     const init: RequestInit = {
       method,
       headers: {
         Authorization: `Zoho-oauthtoken ${token}`,
       },
     };
-    // Zoho Books v3 write APIs expect form field JSONString (official docs).
     if (options.body !== undefined && method !== "GET") {
       const form = new URLSearchParams();
       form.set("JSONString", JSON.stringify(options.body));
@@ -128,6 +146,7 @@ export async function zohoRequest<T = unknown>(
         status: ZohoSyncStatus.failed,
         errorMessage: error instanceof Error ? error.message : "network error",
         attempts,
+        direction,
       });
       if (attempts <= maxRetries) {
         await sleep(2 ** attempts * 250);
@@ -146,6 +165,12 @@ export async function zohoRequest<T = unknown>(
     }
 
     if (res.status === 429 || res.status >= 500) {
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers.get("retry-after") ?? 0);
+        tripZohoRateLimitCooldown(
+          Number.isFinite(retryAfter) ? retryAfter : undefined,
+        );
+      }
       await writeSyncLog({
         action: options.action ?? options.path,
         entityType: options.entityType,
@@ -155,6 +180,7 @@ export async function zohoRequest<T = unknown>(
         status: ZohoSyncStatus.failed,
         errorMessage: message,
         attempts,
+        direction,
       });
       if (attempts <= maxRetries) {
         const retryAfter = Number(res.headers.get("retry-after") ?? 0);
@@ -179,6 +205,7 @@ export async function zohoRequest<T = unknown>(
         status: ZohoSyncStatus.failed,
         errorMessage: message,
         attempts,
+        direction,
       });
       if (res.status === 401) {
         throw new ZohoAuthError(message, json);
@@ -194,6 +221,7 @@ export async function zohoRequest<T = unknown>(
       responsePayload: json,
       status: ZohoSyncStatus.success,
       attempts,
+      direction,
     });
 
     return json as T;
@@ -364,7 +392,10 @@ export async function createCustomerPayment(
 }
 
 export async function getCustomerPayment(zohoId: string) {
-  return zohoRequest<{ payment: Record<string, unknown> }>({
+  return zohoRequest<{
+    payment?: Record<string, unknown>;
+    customerpayment?: Record<string, unknown>;
+  }>({
     method: "GET",
     path: `/customerpayments/${zohoId}`,
     action: "customerpayments.get",
@@ -387,6 +418,26 @@ export async function listCustomerPaymentsModifiedSince(
       per_page: 200,
     },
     action: "customerpayments.list_modified",
+  });
+}
+
+export async function listContactsModifiedSince(
+  lastModifiedTime: string,
+  page = 1,
+) {
+  return zohoRequest<{
+    contacts: Array<Record<string, unknown>>;
+    page_context?: { has_more_page?: boolean };
+  }>({
+    method: "GET",
+    path: "/contacts",
+    query: {
+      last_modified_time: lastModifiedTime,
+      page,
+      per_page: 200,
+      contact_type: "customer",
+    },
+    action: "contacts.list_modified",
   });
 }
 

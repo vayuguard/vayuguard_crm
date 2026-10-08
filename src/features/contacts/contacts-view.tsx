@@ -5,7 +5,15 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, ScanLine, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  Building2,
+  Pencil,
+  Plus,
+  ScanLine,
+  Trash2,
+  UserPlus,
+} from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, unwrapList } from "@/lib/api-client";
 import { formatDate } from "@/lib/utils";
@@ -38,6 +46,7 @@ import {
   CardScanDialog,
   type ScannedContact,
 } from "@/features/contacts/card-scan-dialog";
+import { BulkExcelActions } from "@/components/shared/bulk-excel-actions";
 
 type Contact = {
   id: string;
@@ -170,6 +179,7 @@ function scanToFormValues(
 }
 
 export function ContactsView() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const [search, setSearch] = React.useState("");
@@ -178,6 +188,9 @@ export function ContactsView() {
   const [scanOpen, setScanOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Contact | null>(null);
   const [deleting, setDeleting] = React.useState<Contact | null>(null);
+  const [toLead, setToLead] = React.useState<Contact | null>(null);
+  const [toCustomer, setToCustomer] = React.useState<Contact | null>(null);
+  const [companyName, setCompanyName] = React.useState("");
 
   const form = useForm<ContactFormValues>({
     resolver: zodResolver(contactFormSchema),
@@ -248,6 +261,51 @@ export function ContactsView() {
       toast.success("Contact deleted");
       setDeleting(null);
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const toLeadMutation = useMutation({
+    mutationFn: async (id: string) =>
+      apiFetch<{ lead: { id: string } }>(`/api/contacts/${id}/to-lead`, {
+        method: "POST",
+      }),
+    onSuccess: (res) => {
+      toast.success("Lead created from contact");
+      setToLead(null);
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      const leadId = (res.data as { lead?: { id: string } } | undefined)?.lead
+        ?.id;
+      if (leadId) router.push(`/leads/${leadId}`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const toCustomerMutation = useMutation({
+    mutationFn: async ({
+      id,
+      companyName: name,
+    }: {
+      id: string;
+      companyName?: string;
+    }) =>
+      apiFetch<{ customer: { id: string } }>(
+        `/api/contacts/${id}/to-customer`,
+        {
+          method: "POST",
+          body: JSON.stringify({ companyName: name || null }),
+        },
+      ),
+    onSuccess: (res) => {
+      toast.success("Customer created and contact linked");
+      setToCustomer(null);
+      setCompanyName("");
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      const customerId = (
+        res.data as { customer?: { id: string } } | undefined
+      )?.customer?.id;
+      if (customerId) router.push(`/customers/${customerId}`);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -346,6 +404,32 @@ export function ContactsView() {
       className: "w-[1%] text-right",
       cell: (r) => (
         <div className="flex justify-end gap-1">
+          {can("contacts:write") && can("leads:write") ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Convert to lead"
+              onClick={() => setToLead(r)}
+            >
+              <UserPlus className="size-3.5" />
+            </Button>
+          ) : null}
+          {can("contacts:write") &&
+          can("customers:write") &&
+          !r.customerId &&
+          !r.customer?.id ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Convert to customer"
+              onClick={() => {
+                setCompanyName("");
+                setToCustomer(r);
+              }}
+            >
+              <Building2 className="size-3.5" />
+            </Button>
+          ) : null}
           {can("contacts:write") ? (
             <Button
               variant="ghost"
@@ -378,18 +462,33 @@ export function ContactsView() {
           placeholder="Search contacts…"
           className="max-w-xs"
         />
-        {can("contacts:write") ? (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setScanOpen(true)}>
-              <ScanLine className="size-4" />
-              Scan card
-            </Button>
-            <Button onClick={openCreate}>
-              <Plus className="size-4" />
-              New contact
-            </Button>
-          </div>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <BulkExcelActions
+            entityLabel="contacts"
+            queryKey={["contacts"]}
+            exportUrl={
+              debounced
+                ? `/api/contacts/export?q=${encodeURIComponent(debounced)}`
+                : "/api/contacts/export"
+            }
+            templateUrl="/api/contacts/export?template=1"
+            importUrl="/api/contacts/import"
+            canExport={can("contacts:export")}
+            canImport={can("contacts:import")}
+          />
+          {can("contacts:write") ? (
+            <>
+              <Button variant="outline" onClick={() => setScanOpen(true)}>
+                <ScanLine className="size-4" />
+                Scan card
+              </Button>
+              <Button onClick={openCreate}>
+                <Plus className="size-4" />
+                New contact
+              </Button>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {query.isLoading ? (
@@ -535,6 +634,69 @@ export function ContactsView() {
           if (deleting) deleteMutation.mutate(deleting.id);
         }}
       />
+
+      <ConfirmDialog
+        open={!!toLead}
+        onOpenChange={(open) => !open && setToLead(null)}
+        title="Convert to lead?"
+        description={`Create a new lead from ${toLead?.name ?? "this contact"}. The contact record stays unchanged.`}
+        confirmLabel="Create lead"
+        loading={toLeadMutation.isPending}
+        onConfirm={() => {
+          if (toLead) toLeadMutation.mutate(toLead.id);
+        }}
+      />
+
+      <Dialog
+        open={!!toCustomer}
+        onOpenChange={(open) => {
+          if (!open) {
+            setToCustomer(null);
+            setCompanyName("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>Convert to customer</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Creates a customer account and links{" "}
+              {toCustomer?.name ?? "this contact"} to it.
+            </p>
+            <Field label="Company / customer name (optional)">
+              <Input
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder={toCustomer?.name ?? "Company name"}
+              />
+            </Field>
+            <div className="flex justify-end gap-2 border-t border-border pt-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setToCustomer(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={toCustomerMutation.isPending}
+                onClick={() => {
+                  if (toCustomer) {
+                    toCustomerMutation.mutate({
+                      id: toCustomer.id,
+                      companyName: companyName.trim() || undefined,
+                    });
+                  }
+                }}
+              >
+                {toCustomerMutation.isPending ? "Creating…" : "Create customer"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

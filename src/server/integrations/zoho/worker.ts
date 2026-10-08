@@ -1,17 +1,14 @@
 import { ZohoQueueStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { syncCustomerToZoho } from "@/server/integrations/zoho/jobs/sync-customer";
-import { syncInvoiceToZoho } from "@/server/integrations/zoho/jobs/sync-invoice";
-import { syncPaymentToZoho } from "@/server/integrations/zoho/jobs/sync-payment";
-import { syncQuotationToZoho } from "@/server/integrations/zoho/jobs/sync-quotation";
 import { pullZohoUpdates } from "@/server/integrations/zoho/jobs/pull-updates";
 import { processZohoWebhook } from "@/server/integrations/zoho/jobs/process-webhook";
 import {
+  isZohoOutboundJob,
   MAX_ATTEMPTS,
   nextBackoffMs,
 } from "@/server/integrations/zoho/queue";
 
-export async function processZohoQueueBatch(limit = 20) {
+export async function processZohoQueueBatch(limit = 10) {
   const jobs = await prisma.zohoSyncQueue.findMany({
     where: {
       status: { in: [ZohoQueueStatus.pending, ZohoQueueStatus.failed] },
@@ -30,21 +27,22 @@ export async function processZohoQueueBatch(limit = 20) {
     });
 
     try {
+      // Inbound-only: never push CRM data to Zoho.
+      if (isZohoOutboundJob(job.jobType)) {
+        await prisma.zohoSyncQueue.update({
+          where: { id: job.id },
+          data: {
+            status: ZohoQueueStatus.succeeded,
+            lastError: "skipped: outbound disabled (Zoho → CRM only)",
+            attempts: job.attempts + 1,
+          },
+        });
+        processed += 1;
+        continue;
+      }
+
       const payload = job.payload as Record<string, unknown>;
-      const force = payload.force === true;
       switch (job.jobType) {
-        case "sync_customer":
-          await syncCustomerToZoho(String(payload.customerId), { force });
-          break;
-        case "sync_quotation":
-          await syncQuotationToZoho(String(payload.quotationId), { force });
-          break;
-        case "sync_invoice":
-          await syncInvoiceToZoho(String(payload.invoiceId), { force });
-          break;
-        case "sync_payment":
-          await syncPaymentToZoho(String(payload.paymentId), { force });
-          break;
         case "pull_updates":
           await pullZohoUpdates();
           break;
@@ -88,7 +86,9 @@ export async function processZohoQueueBatch(limit = 20) {
 
 /** Long-running worker loop for PM2 / systemd. */
 export async function runZohoWorkerLoop(intervalMs = 5000) {
-  console.log(`[zoho-worker] started (interval ${intervalMs}ms)`);
+  console.log(
+    `[zoho-worker] started inbound-only (interval ${intervalMs}ms)`,
+  );
   for (;;) {
     try {
       const result = await processZohoQueueBatch();

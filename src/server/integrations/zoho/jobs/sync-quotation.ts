@@ -4,6 +4,7 @@ import {
   createEstimate,
   updateEstimate,
 } from "@/server/integrations/zoho/client";
+import { isZohoOutboundEnabled } from "@/server/integrations/zoho/config";
 import { isZohoSyncEnabled } from "@/server/integrations/zoho/sync-enabled";
 import { mapQuotationToZohoEstimate } from "@/server/integrations/zoho/mappers/estimate";
 import { syncCustomerToZoho } from "@/server/integrations/zoho/jobs/sync-customer";
@@ -17,6 +18,9 @@ export async function syncQuotationToZoho(
   quotationId: string,
   opts?: { force?: boolean },
 ) {
+  if (!isZohoOutboundEnabled()) {
+    return { skipped: true as const, reason: "outbound_disabled" as const };
+  }
   if (!opts?.force && !(await isZohoSyncEnabled())) {
     return { skipped: true as const };
   }

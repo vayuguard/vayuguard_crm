@@ -79,8 +79,8 @@ export class StubAiProvider implements AiProvider {
       entityId: req.entityId,
       model: this.model,
       payload: {
-        subject: "Following up — VayuGuard",
-        body: `Hi,\n\nThank you for your interest in VayuGuard. I'd love to schedule a short call to understand your requirements.\n\nBest regards`,
+        subject: "Following up — VayuCrm",
+        body: `Hi,\n\nThank you for your interest in VayuCrm. I'd love to schedule a short call to understand your requirements.\n\nBest regards`,
         tone: "professional",
         context: (req.context ?? {}) as Prisma.InputJsonValue,
       },

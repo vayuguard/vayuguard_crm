@@ -12,18 +12,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ZohoEntityType } from "@prisma/client";
 import { prisma } from "../src/server/db/client";
-import {
-  createContactJson,
-  searchContacts,
-} from "../src/server/integrations/zoho/client";
+import { searchContacts } from "../src/server/integrations/zoho/client";
 import { assertZohoCredentialsConfigured } from "../src/server/integrations/zoho/config";
-import { mapCustomerToZohoContact } from "../src/server/integrations/zoho/mappers/customer";
 import {
   getSyncState,
   setSyncState,
   upsertZohoLink,
 } from "../src/server/integrations/zoho/queue";
-import { syncInvoiceToZoho } from "../src/server/integrations/zoho/jobs/sync-invoice";
 
 type Row = {
   crmId: string;
@@ -169,53 +164,20 @@ async function main() {
           note: `matched via ${matches[0]!.via}`,
         });
       } else {
-        if (opts.apply) {
-          try {
-            const payload = mapCustomerToZohoContact(customer);
-            const created = await createContactJson(payload, customer.id);
-            const zohoId = created.contact.contact_id;
-            await upsertZohoLink({
-              entityType: ZohoEntityType.customer,
-              crmId: customer.id,
-              zohoId,
-            });
-            rows.push({
-              crmId: customer.id,
-              customerNumber: customer.customerNumber,
-              name: customer.name,
-              email: customer.email ?? "",
-              phone: customer.phone ?? "",
-              gstNumber: customer.gstNumber ?? "",
-              status: "created",
-              zohoId,
-              note: "created in Zoho",
-            });
-          } catch (error) {
-            rows.push({
-              crmId: customer.id,
-              customerNumber: customer.customerNumber,
-              name: customer.name,
-              email: customer.email ?? "",
-              phone: customer.phone ?? "",
-              gstNumber: customer.gstNumber ?? "",
-              status: "conflict",
-              zohoId: "",
-              note: error instanceof Error ? error.message : "create failed",
-            });
-          }
-        } else {
-          rows.push({
-            crmId: customer.id,
-            customerNumber: customer.customerNumber,
-            name: customer.name,
-            email: customer.email ?? "",
-            phone: customer.phone ?? "",
-            gstNumber: customer.gstNumber ?? "",
-            status: "unmatched",
-            zohoId: "",
-            note: "would create in Zoho on --apply",
-          });
-        }
+        // Inbound-only: never create contacts in Zoho from CRM.
+        rows.push({
+          crmId: customer.id,
+          customerNumber: customer.customerNumber,
+          name: customer.name,
+          email: customer.email ?? "",
+          phone: customer.phone ?? "",
+          gstNumber: customer.gstNumber ?? "",
+          status: "unmatched",
+          zohoId: "",
+          note: opts.apply
+            ? "no Zoho match — skipped (outbound disabled; CRM does not write to Zoho)"
+            : "no Zoho match — would not create (inbound-only)",
+        });
       }
 
       cursor = customer.id;
@@ -229,34 +191,9 @@ async function main() {
   }
 
   if (opts.apply && opts.invoices) {
-    const openInvoices = await prisma.invoice.findMany({
-      where: {
-        deletedAt: null,
-        status: { not: "CANCELLED" },
-      },
-      select: { id: true, invoiceNumber: true },
-      take: 500,
-    });
-    for (const inv of openInvoices) {
-      try {
-        await syncInvoiceToZoho(inv.id);
-      } catch (error) {
-        rows.push({
-          crmId: inv.id,
-          customerNumber: inv.invoiceNumber,
-          name: "invoice",
-          email: "",
-          phone: "",
-          gstNumber: "",
-          status: "conflict",
-          zohoId: "",
-          note: error instanceof Error ? error.message : "invoice sync failed",
-        });
-      }
-      if (opts.delayMs > 0) {
-        await new Promise((r) => setTimeout(r, opts.delayMs));
-      }
-    }
+    console.warn(
+      "Skipping --invoices: outbound invoice create is disabled (Zoho → CRM only).",
+    );
   }
 
   const header =
