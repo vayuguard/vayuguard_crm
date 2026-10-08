@@ -73,6 +73,36 @@ type Contact = {
 
 type CustomerOption = { id: string; name: string };
 
+const INTEREST_OPTIONS = [
+  { value: "not_interested", label: "Not interested", score: 0 },
+  { value: "cold", label: "Cold", score: 25 },
+  { value: "warm", label: "Warm", score: 50 },
+  { value: "interested", label: "Interested", score: 75 },
+  { value: "hot", label: "Hot", score: 100 },
+] as const;
+
+type InterestValue = (typeof INTEREST_OPTIONS)[number]["value"];
+
+function interestFromScore(score: number | null | undefined): InterestValue {
+  const s = score ?? 50;
+  if (s <= 12) return "not_interested";
+  if (s <= 37) return "cold";
+  if (s <= 62) return "warm";
+  if (s <= 87) return "interested";
+  return "hot";
+}
+
+function scoreFromInterest(interest: InterestValue): number {
+  return (
+    INTEREST_OPTIONS.find((o) => o.value === interest)?.score ?? 50
+  );
+}
+
+function interestLabel(score: number | null | undefined): string {
+  const value = interestFromScore(score);
+  return INTEREST_OPTIONS.find((o) => o.value === value)?.label ?? "Warm";
+}
+
 const contactFormSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
   designation: z.string().optional(),
@@ -86,7 +116,13 @@ const contactFormSchema = z.object({
   twitterUrl: z.string().optional(),
   facebookUrl: z.string().optional(),
   notes: z.string().optional(),
-  relationshipScore: z.coerce.number().int().min(0).max(100),
+  interest: z.enum([
+    "not_interested",
+    "cold",
+    "warm",
+    "interested",
+    "hot",
+  ]),
   tags: z.string().optional(),
 });
 
@@ -105,7 +141,7 @@ const emptyForm: ContactFormValues = {
   twitterUrl: "",
   facebookUrl: "",
   notes: "",
-  relationshipScore: 50,
+  interest: "warm",
   tags: "",
 };
 
@@ -123,7 +159,7 @@ function toPayload(values: ContactFormValues) {
     twitterUrl: values.twitterUrl || null,
     facebookUrl: values.facebookUrl || null,
     notes: values.notes || null,
-    relationshipScore: values.relationshipScore,
+    relationshipScore: scoreFromInterest(values.interest),
     tags: values.tags || "",
   };
 }
@@ -216,9 +252,12 @@ export function ContactsView() {
   const customersQuery = useQuery({
     queryKey: ["customers", "options"],
     queryFn: async () => {
-      const res = await apiFetch<unknown>("/api/customers?pageSize=100");
+      const res = await apiFetch<unknown>(
+        "/api/customers?pageSize=100&order=asc&sort=name",
+      );
       return unwrapList<CustomerOption>(res.data);
     },
+    enabled: dialogOpen || scanOpen,
   });
 
   const saveMutation = useMutation({
@@ -357,7 +396,7 @@ export function ContactsView() {
       twitterUrl: contact.twitterUrl ?? "",
       facebookUrl: contact.facebookUrl ?? "",
       notes: contact.notes ?? "",
-      relationshipScore: contact.relationshipScore ?? 50,
+      interest: interestFromScore(contact.relationshipScore),
       tags: tagNames,
     });
     setDialogOpen(true);
@@ -387,10 +426,9 @@ export function ContactsView() {
       cell: (r) => r.department ?? "—",
     },
     {
-      id: "score",
-      header: "Score",
-      cell: (r) =>
-        r.relationshipScore != null ? String(r.relationshipScore) : "—",
+      id: "interest",
+      header: "Interest",
+      cell: (r) => interestLabel(r.relationshipScore),
     },
     {
       id: "customer",
@@ -548,7 +586,14 @@ export function ContactsView() {
               <Field label="Birthday">
                 <Input type="date" {...form.register("birthday")} />
               </Field>
-              <Field label="Customer">
+              <Field
+                label="Customer (company account)"
+                error={
+                  customersQuery.isError
+                    ? (customersQuery.error as Error).message
+                    : undefined
+                }
+              >
                 <Select
                   value={form.watch("customerId") || "__none__"}
                   onValueChange={(v) =>
@@ -559,10 +604,18 @@ export function ContactsView() {
                   }
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select customer" />
+                    <SelectValue placeholder="Link to a customer…" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className="z-[200]"
+                  >
                     <SelectItem value="__none__">None</SelectItem>
+                    {customersQuery.isLoading ? (
+                      <SelectItem value="__loading__" disabled>
+                        Loading customers…
+                      </SelectItem>
+                    ) : null}
                     {(customersQuery.data ?? []).map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.name}
@@ -570,14 +623,35 @@ export function ContactsView() {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Optional — which company this person belongs to. Create
+                  customers under Customers first if the list is empty.
+                </p>
               </Field>
-              <Field label="Relationship score (0–100)">
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  {...form.register("relationshipScore")}
-                />
+              <Field label="Interest">
+                <Select
+                  value={form.watch("interest")}
+                  onValueChange={(v) =>
+                    form.setValue(
+                      "interest",
+                      (v as InterestValue) || "warm",
+                    )
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select interest" />
+                  </SelectTrigger>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className="z-[200]"
+                  >
+                    {INTEREST_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
               <Field label="LinkedIn URL">
                 <Input {...form.register("linkedinUrl")} placeholder="https://" />
