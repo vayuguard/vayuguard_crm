@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
-import { notFound } from "@/server/api/errors";
+import { notFound, validationError } from "@/server/api/errors";
 import { emptyToNull, optionalUrl } from "@/lib/validators/common";
 import { PERMISSIONS } from "@/lib/permissions";
 
@@ -86,7 +86,25 @@ export async function updateCompanySettings(input: UpdateCompanySettingsInput) {
   });
 }
 
+/** Keep Permission rows in sync with code so Import/Export keys appear in Settings. */
+async function ensurePermissionCatalog() {
+  for (const perm of PERMISSIONS) {
+    await prisma.permission.upsert({
+      where: { key: perm.key },
+      update: { name: perm.name, module: perm.module },
+      create: {
+        key: perm.key,
+        name: perm.name,
+        module: perm.module,
+        description: perm.name,
+      },
+    });
+  }
+}
+
 export async function listRolesWithPermissions() {
+  await ensurePermissionCatalog();
+
   const roles = await prisma.role.findMany({
     include: {
       permissions: {
@@ -112,6 +130,8 @@ export async function listRolesWithPermissions() {
 }
 
 export async function updateRolePermissions(input: UpdateRolePermissionsInput) {
+  await ensurePermissionCatalog();
+
   const role = await prisma.role.findUnique({ where: { id: input.roleId } });
   if (!role) throw notFound("Role not found");
 
@@ -119,6 +139,13 @@ export async function updateRolePermissions(input: UpdateRolePermissionsInput) {
     where: { key: { in: input.permissionKeys } },
     select: { id: true, key: true },
   });
+
+  const missing = input.permissionKeys.filter(
+    (key) => !permissions.some((p) => p.key === key),
+  );
+  if (missing.length) {
+    throw validationError(`Unknown permissions: ${missing.join(", ")}`);
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.rolePermission.deleteMany({ where: { roleId: role.id } });

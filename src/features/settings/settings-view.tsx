@@ -93,7 +93,31 @@ function permissionKey(p: PermissionItem): string {
 }
 
 function permissionLabel(p: PermissionItem): string {
-  return typeof p === "string" ? p : `${p.name} (${p.key})`;
+  return typeof p === "string" ? p : p.name;
+}
+
+function permissionModule(p: PermissionItem): string {
+  return typeof p === "string" ? "other" : p.module;
+}
+
+const EXCEL_PERMISSION_KEYS = [
+  "leads:export",
+  "leads:import",
+  "customers:export",
+  "customers:import",
+  "contacts:export",
+  "contacts:import",
+] as const;
+
+function groupPermissionsByModule(perms: PermissionItem[]) {
+  const groups = new Map<string, PermissionItem[]>();
+  for (const p of perms) {
+    const mod = permissionModule(p);
+    const list = groups.get(mod) ?? [];
+    list.push(p);
+    groups.set(mod, list);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
 
 function safeJsonString(value: unknown): string {
@@ -304,11 +328,33 @@ export function SettingsView() {
         }),
       }),
     onSuccess: () => {
-      toast.success("Role permissions saved");
+      toast.success(
+        "Role permissions saved. Employees see Import/Export within about a minute (or after refresh / re-login).",
+      );
       queryClient.invalidateQueries({ queryKey: ["settings", "roles"] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
+
+  function toggleRolePermission(roleId: string, key: string, enabled: boolean) {
+    setRoleDrafts((prev) => {
+      const current = new Set(prev[roleId] ?? []);
+      if (enabled) current.add(key);
+      else current.delete(key);
+      return { ...prev, [roleId]: [...current] };
+    });
+  }
+
+  function setExcelAccess(roleId: string, enabled: boolean) {
+    setRoleDrafts((prev) => {
+      const current = new Set(prev[roleId] ?? []);
+      for (const key of EXCEL_PERMISSION_KEYS) {
+        if (enabled) current.add(key);
+        else current.delete(key);
+      }
+      return { ...prev, [roleId]: [...current] };
+    });
+  }
 
   const createCustomFieldMutation = useMutation({
     mutationFn: async () =>
@@ -705,6 +751,12 @@ export function SettingsView() {
                 <CardTitle className="text-sm font-semibold">
                   Roles & permissions
                 </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  To let employees use Excel Import/Export: open their role
+                  (e.g. Sales Executive), enable the Import/Export (Excel)
+                  permissions, then Save. They will see the buttons after a
+                  page refresh or within about a minute.
+                </p>
               </CardHeader>
               <CardContent>
                 {rolesQuery.isLoading ? (
@@ -718,6 +770,15 @@ export function SettingsView() {
                   <div className="grid gap-4">
                     {(rolesQuery.data?.roles ?? []).map((role) => {
                       const selected = new Set(roleDrafts[role.id] ?? []);
+                      const excelEnabled = EXCEL_PERMISSION_KEYS.every((k) =>
+                        selected.has(k),
+                      );
+                      const excelPartial = EXCEL_PERMISSION_KEYS.some((k) =>
+                        selected.has(k),
+                      );
+                      const grouped = groupPermissionsByModule(
+                        availablePermissions,
+                      );
                       return (
                         <div
                           key={role.id}
@@ -733,9 +794,37 @@ export function SettingsView() {
                                   : ""}
                               </p>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               {role.isSystem ? (
                                 <Badge variant="outline">System</Badge>
+                              ) : null}
+                              {canWrite &&
+                              role.slug !== "SUPER_ADMIN" &&
+                              role.slug !== "ADMIN" ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    type="button"
+                                    onClick={() =>
+                                      setExcelAccess(role.id, true)
+                                    }
+                                  >
+                                    Enable Excel import/export
+                                  </Button>
+                                  {excelPartial ? (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      type="button"
+                                      onClick={() =>
+                                        setExcelAccess(role.id, false)
+                                      }
+                                    >
+                                      Clear Excel access
+                                    </Button>
+                                  ) : null}
+                                </>
                               ) : null}
                               {canWrite ? (
                                 <Button
@@ -753,38 +842,64 @@ export function SettingsView() {
                               {role.description}
                             </p>
                           ) : null}
-                          <div className="mt-3 grid max-h-64 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-                            {availablePermissions.map((perm) => {
-                              const key = permissionKey(perm);
-                              const checked = selected.has(key);
-                              return (
-                                <label
-                                  key={`${role.id}-${key}`}
-                                  className="flex cursor-pointer items-start gap-2 rounded-md border border-border/70 px-2 py-1.5 text-xs"
-                                >
-                                  <Checkbox
-                                    checked={checked}
-                                    disabled={!canWrite}
-                                    onCheckedChange={(v) => {
-                                      setRoleDrafts((prev) => {
-                                        const current = new Set(
-                                          prev[role.id] ?? [],
-                                        );
-                                        if (v) current.add(key);
-                                        else current.delete(key);
-                                        return {
-                                          ...prev,
-                                          [role.id]: [...current],
-                                        };
-                                      });
-                                    }}
-                                  />
-                                  <span className="leading-snug">
-                                    {permissionLabel(perm)}
-                                  </span>
-                                </label>
-                              );
-                            })}
+                          {excelEnabled ? (
+                            <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+                              Excel import &amp; export enabled for leads,
+                              customers, and contacts.
+                            </p>
+                          ) : excelPartial ? (
+                            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                              Partial Excel access — review Import/Export
+                              checkboxes below, then Save.
+                            </p>
+                          ) : null}
+                          <div className="mt-3 max-h-80 space-y-4 overflow-y-auto">
+                            {grouped.map(([module, perms]) => (
+                              <div key={`${role.id}-${module}`}>
+                                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  {module}
+                                </p>
+                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                  {perms.map((perm) => {
+                                    const key = permissionKey(perm);
+                                    const checked = selected.has(key);
+                                    const isExcel = EXCEL_PERMISSION_KEYS.includes(
+                                      key as (typeof EXCEL_PERMISSION_KEYS)[number],
+                                    );
+                                    return (
+                                      <label
+                                        key={`${role.id}-${key}`}
+                                        className={`flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 text-xs ${
+                                          isExcel
+                                            ? "border-primary/40 bg-primary/5"
+                                            : "border-border/70"
+                                        }`}
+                                      >
+                                        <Checkbox
+                                          checked={checked}
+                                          disabled={!canWrite}
+                                          onCheckedChange={(v) =>
+                                            toggleRolePermission(
+                                              role.id,
+                                              key,
+                                              Boolean(v),
+                                            )
+                                          }
+                                        />
+                                        <span className="leading-snug">
+                                          {permissionLabel(perm)}
+                                          {isExcel ? (
+                                            <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                                              {key}
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       );
