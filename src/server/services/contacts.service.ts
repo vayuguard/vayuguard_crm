@@ -338,6 +338,13 @@ async function resolveCustomerIdFromImport(row: Record<string, string>) {
   return null;
 }
 
+/**
+ * Excel / bulk import is additive:
+ * - Never deletes existing contacts
+ * - Updates when email (or phone) matches
+ * - Creates only when no match
+ * - Blank Excel cells do not wipe fields already stored
+ */
 export async function importContactsFromRows(
   rows: Array<Record<string, string>>,
   userId: string,
@@ -364,11 +371,15 @@ export async function importContactsFromRows(
 
     try {
       const email = pickColumn(row, "email") || null;
+      const phone = pickColumn(row, "phone") || null;
       const customerId = await resolveCustomerIdFromImport(row);
-      const tags = pickColumn(row, "tags")
-        .split(/[,;]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const tagsRaw = pickColumn(row, "tags");
+      const tags = tagsRaw
+        ? tagsRaw
+            .split(/[,;]+/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined;
       const interestRaw = pickColumn(row, "interest");
       const interest = parseInterest(interestRaw);
       if (interestRaw && !interest) {
@@ -381,35 +392,65 @@ export async function importContactsFromRows(
         continue;
       }
 
-      const data = {
-        name,
-        designation: pickColumn(row, "designation") || null,
-        email,
-        phone: pickColumn(row, "phone") || null,
-        whatsapp: pickColumn(row, "whatsapp") || null,
-        department: pickColumn(row, "department") || null,
-        customerId,
-        relationshipScore: interest ? INTEREST_SCORES[interest] : undefined,
-        linkedinUrl: pickColumn(row, "linkedinUrl") || null,
-        twitterUrl: pickColumn(row, "twitterUrl") || null,
-        facebookUrl: pickColumn(row, "facebookUrl") || null,
-        notes: pickColumn(row, "notes") || null,
-        tags,
-        tagIds: [] as string[],
-      };
-
       const existing = email
         ? await prisma.contact.findFirst({
             where: { email, deletedAt: null },
             select: { id: true },
           })
-        : null;
+        : phone
+          ? await prisma.contact.findFirst({
+              where: { phone, deletedAt: null },
+              select: { id: true },
+            })
+          : null;
 
       if (existing) {
-        await updateContact(existing.id, data, userId);
+        // Partial update — omit blank fields so prior data stays.
+        const patch: UpdateContactInput = { name };
+        const designation = pickColumn(row, "designation");
+        if (designation) patch.designation = designation;
+        if (email) patch.email = email;
+        if (phone) patch.phone = phone;
+        const whatsapp = pickColumn(row, "whatsapp");
+        if (whatsapp) patch.whatsapp = whatsapp;
+        const department = pickColumn(row, "department");
+        if (department) patch.department = department;
+        if (customerId) patch.customerId = customerId;
+        if (interest) patch.relationshipScore = INTEREST_SCORES[interest];
+        const linkedinUrl = pickColumn(row, "linkedinUrl");
+        if (linkedinUrl) patch.linkedinUrl = linkedinUrl;
+        const twitterUrl = pickColumn(row, "twitterUrl");
+        if (twitterUrl) patch.twitterUrl = twitterUrl;
+        const facebookUrl = pickColumn(row, "facebookUrl");
+        if (facebookUrl) patch.facebookUrl = facebookUrl;
+        const notes = pickColumn(row, "notes");
+        if (notes) patch.notes = notes;
+        if (tags) patch.tags = tags;
+
+        await updateContact(existing.id, patch, userId);
         results.updated += 1;
       } else {
-        await createContact(data, userId);
+        await createContact(
+          {
+            name,
+            designation: pickColumn(row, "designation") || null,
+            email,
+            phone,
+            whatsapp: pickColumn(row, "whatsapp") || null,
+            department: pickColumn(row, "department") || null,
+            customerId,
+            relationshipScore: interest
+              ? INTEREST_SCORES[interest]
+              : undefined,
+            linkedinUrl: pickColumn(row, "linkedinUrl") || null,
+            twitterUrl: pickColumn(row, "twitterUrl") || null,
+            facebookUrl: pickColumn(row, "facebookUrl") || null,
+            notes: pickColumn(row, "notes") || null,
+            tags: tags ?? [],
+            tagIds: [],
+          },
+          userId,
+        );
         results.created += 1;
       }
     } catch (error) {

@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -27,6 +26,8 @@ type DataTableProps<T> = {
   emptyDescription?: string;
   onRowClick?: (row: T) => void;
   className?: string;
+  /** Max height for vertical scroll (e.g. "min(60vh, 32rem)") */
+  maxHeight?: string;
 };
 
 export function DataTable<T>({
@@ -37,6 +38,7 @@ export function DataTable<T>({
   emptyDescription,
   onRowClick,
   className,
+  maxHeight = "min(65vh, 36rem)",
 }: DataTableProps<T>) {
   if (!data.length) {
     return (
@@ -51,38 +53,43 @@ export function DataTable<T>({
         className,
       )}
     >
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            {columns.map((col) => (
-              <TableHead
-                key={col.id}
-                className={cn(
-                  "bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground",
-                  col.headerClassName,
-                )}
-              >
-                {col.header}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.map((row) => (
-            <TableRow
-              key={getRowId(row)}
-              className={cn(onRowClick && "cursor-pointer")}
-              onClick={() => onRowClick?.(row)}
-            >
+      <div
+        className="relative w-full overflow-auto"
+        style={maxHeight ? { maxHeight } : undefined}
+      >
+        <table className="w-full caption-bottom text-sm">
+          <TableHeader className="sticky top-0 z-10 [&_tr]:border-b">
+            <TableRow className="hover:bg-transparent">
               {columns.map((col) => (
-                <TableCell key={col.id} className={col.className}>
-                  {col.cell(row)}
-                </TableCell>
+                <TableHead
+                  key={col.id}
+                  className={cn(
+                    "bg-muted/95 backdrop-blur-sm text-xs font-semibold uppercase tracking-wide text-muted-foreground",
+                    col.headerClassName,
+                  )}
+                >
+                  {col.header}
+                </TableHead>
               ))}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {data.map((row) => (
+              <TableRow
+                key={getRowId(row)}
+                className={cn(onRowClick && "cursor-pointer")}
+                onClick={() => onRowClick?.(row)}
+              >
+                {columns.map((col) => (
+                  <TableCell key={col.id} className={col.className}>
+                    {col.cell(row)}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </table>
+      </div>
     </div>
   );
 }

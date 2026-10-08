@@ -39,6 +39,7 @@ import {
   DataTable,
   type DataTableColumn,
 } from "@/components/shared/data-table";
+import { TablePagination } from "@/components/shared/table-pagination";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -47,6 +48,8 @@ import {
   type ScannedContact,
 } from "@/features/contacts/card-scan-dialog";
 import { BulkExcelActions } from "@/components/shared/bulk-excel-actions";
+
+const CONTACTS_PAGE_SIZE = 50;
 
 type Contact = {
   id: string;
@@ -220,6 +223,7 @@ export function ContactsView() {
   const { can } = usePermissions();
   const [search, setSearch] = React.useState("");
   const [debounced, setDebounced] = React.useState("");
+  const [page, setPage] = React.useState(1);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [scanOpen, setScanOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Contact | null>(null);
@@ -238,14 +242,25 @@ export function ContactsView() {
     return () => clearTimeout(t);
   }, [search]);
 
+  React.useEffect(() => {
+    setPage(1);
+  }, [debounced]);
+
   const query = useQuery({
-    queryKey: ["contacts", debounced],
+    queryKey: ["contacts", debounced, page],
     queryFn: async () => {
       const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("pageSize", String(CONTACTS_PAGE_SIZE));
       if (debounced) params.set("q", debounced);
-      const url = params.size ? `/api/contacts?${params}` : "/api/contacts";
-      const res = await apiFetch<unknown>(url);
-      return unwrapList<Contact>(res.data);
+      const res = await apiFetch<unknown>(`/api/contacts?${params}`);
+      return {
+        items: unwrapList<Contact>(res.data),
+        total: res.meta?.total ?? 0,
+        totalPages: res.meta?.totalPages ?? 1,
+        page: res.meta?.page ?? page,
+        pageSize: res.meta?.pageSize ?? CONTACTS_PAGE_SIZE,
+      };
     },
   });
 
@@ -542,13 +557,23 @@ export function ContactsView() {
           }
         />
       ) : (
-        <DataTable
-          columns={columns}
-          data={query.data ?? []}
-          getRowId={(r) => r.id}
-          emptyTitle="No contacts yet"
-          emptyDescription="Add contacts to link people to accounts."
-        />
+        <div className="space-y-2">
+          <DataTable
+            columns={columns}
+            data={query.data?.items ?? []}
+            getRowId={(r) => r.id}
+            emptyTitle="No contacts yet"
+            emptyDescription="Add contacts to link people to accounts. Excel import adds or updates rows — it never deletes existing contacts."
+          />
+          <TablePagination
+            page={query.data?.page ?? page}
+            pageSize={query.data?.pageSize ?? CONTACTS_PAGE_SIZE}
+            total={query.data?.total ?? 0}
+            totalPages={query.data?.totalPages ?? 1}
+            onPageChange={setPage}
+            label="contacts"
+          />
+        </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

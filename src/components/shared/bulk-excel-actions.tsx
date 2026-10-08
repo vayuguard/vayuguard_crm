@@ -55,7 +55,8 @@ export function BulkExcelActions({
       const errCount = result.errors?.length ?? 0;
       toast.success(
         `Imported ${entityLabel}: ${result.created ?? 0} created, ${result.updated ?? 0} updated` +
-          (errCount ? `, ${errCount} row error(s)` : ""),
+          (errCount ? `, ${errCount} row error(s)` : "") +
+          ". Existing records were kept.",
       );
       if (errCount && result.errors?.[0]) {
         toast.message(
