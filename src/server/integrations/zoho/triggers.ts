@@ -5,19 +5,23 @@ import { enqueueZohoJob } from "@/server/integrations/zoho/queue";
  * Outbound helpers are intentional no-ops so service call sites stay safe.
  */
 
-export async function queueCustomerSync(_customerId: string) {
+export async function queueCustomerSync(customerId: string) {
+  void customerId;
   return null;
 }
 
-export async function queueQuotationSync(_quotationId: string) {
+export async function queueQuotationSync(quotationId: string) {
+  void quotationId;
   return null;
 }
 
-export async function queueInvoiceSync(_invoiceId: string) {
+export async function queueInvoiceSync(invoiceId: string) {
+  void invoiceId;
   return null;
 }
 
-export async function queuePaymentSync(_paymentId: string) {
+export async function queuePaymentSync(paymentId: string) {
+  void paymentId;
   return null;
 }
 

@@ -40,7 +40,7 @@ export async function syncPaymentToZoho(
     return { deferred: true as const };
   }
 
-  let customerLink = await getZohoLink(
+  const customerLink = await getZohoLink(
     ZohoEntityType.customer,
     payment.customerId,
   );
