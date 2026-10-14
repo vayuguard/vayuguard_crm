@@ -22,6 +22,7 @@ export const createContactSchema = z.object({
   whatsapp: emptyToNull,
   birthday: optionalDate,
   department: emptyToNull,
+  departmentSubtype: emptyToNull,
   customerId: optionalCuid,
   linkedinUrl: optionalUrl,
   twitterUrl: optionalUrl,
@@ -73,7 +74,18 @@ const contactInclude = {
     select: { id: true, name: true, customerNumber: true },
   },
   tags: { include: { tag: true } },
+  createdBy: { select: { id: true, name: true, email: true } },
+  updatedBy: { select: { id: true, name: true, email: true } },
 } satisfies Prisma.ContactInclude;
+
+async function attributionTagName(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true, email: true },
+  });
+  const label = user?.name?.trim() || user?.email || "unknown";
+  return `by:${label}`;
+}
 
 function buildWhere(
   filters: ContactFilters,
@@ -154,10 +166,19 @@ export async function createContact(
   userId: string,
 ) {
   const { tagIds = [], tags = [], ...data } = input;
-  const resolvedTagIds = await resolveTagIds(tagIds, tags);
+  const byTag = await attributionTagName(userId);
+  const mergedTags = [...tags.filter(Boolean), byTag];
+  const resolvedTagIds = await resolveTagIds(tagIds, mergedTags);
+  // Clear subtype when department has no subtypes
+  const departmentSubtype =
+    data.department &&
+    ["contractor", "gov", "management_company"].includes(data.department)
+      ? data.departmentSubtype
+      : null;
   return prisma.contact.create({
     data: {
       ...data,
+      departmentSubtype,
       createdById: userId,
       updatedById: userId,
       tags:
@@ -181,9 +202,24 @@ export async function updateContact(
 
   const { tagIds, tags, ...data } = input;
   const shouldUpdateTags = tagIds !== undefined || tags !== undefined;
-  const resolvedTagIds = shouldUpdateTags
+  let resolvedTagIds = shouldUpdateTags
     ? await resolveTagIds(tagIds, tags)
     : undefined;
+
+  // Always keep/refresh attribution tag so admin can see who last touched it.
+  const byTag = await attributionTagName(userId);
+  const byTagId = (await resolveTagIds([], [byTag]))[0];
+  if (resolvedTagIds && byTagId && !resolvedTagIds.includes(byTagId)) {
+    resolvedTagIds = [...resolvedTagIds, byTagId];
+  }
+
+  const departmentSubtype =
+    data.department === undefined
+      ? undefined
+      : data.department &&
+          ["contractor", "gov", "management_company"].includes(data.department)
+        ? (data.departmentSubtype ?? null)
+        : null;
 
   return prisma.$transaction(async (tx) => {
     if (resolvedTagIds) {
@@ -194,11 +230,16 @@ export async function updateContact(
           skipDuplicates: true,
         });
       }
+    } else if (byTagId) {
+      await tx.contactTag.createMany({
+        data: [{ contactId: id, tagId: byTagId }],
+        skipDuplicates: true,
+      });
     }
 
     return tx.contact.update({
       where: { id },
-      data: { ...data, updatedById: userId },
+      data: { ...data, departmentSubtype, updatedById: userId },
       include: contactInclude,
     });
   });
@@ -225,6 +266,7 @@ export async function deleteContact(id: string, userId: string) {
  *   whatsapp ← mobile
  *   designation ← designation
  *   department ← department
+ *   departmentSubtype ← contractor/gov/management_company subtype
  * customerNumber/customerEmail link to CRM Customer (Zoho company Contact).
  * interest / social / notes / tags are CRM-only (not from Zoho).
  *
@@ -239,6 +281,7 @@ export const CONTACT_EXCEL_HEADERS = [
   "whatsapp",
   "designation",
   "department",
+  "departmentSubtype",
   // Link to CRM Customer (Zoho company Contact)
   "customerNumber",
   "customerEmail",
@@ -285,6 +328,18 @@ function parseInterest(value: string): InterestLabel | null {
   return null;
 }
 
+function normalizeDepartmentValue(raw: string): string | null {
+  const v = raw.trim().toLowerCase().replace(/\s+/g, "_");
+  if (!v) return null;
+  if (v === "manegement_company" || v === "management") {
+    return "management_company";
+  }
+  if (v === "government" || v === "govt") return "gov";
+  if (v === "hospital") return "hospitals";
+  if (v === "institution") return "institutions";
+  return v;
+}
+
 export async function exportContacts(
   filters: ContactFilters = {},
   q?: string,
@@ -307,6 +362,7 @@ export async function exportContacts(
     whatsapp: c.whatsapp ?? "",
     designation: c.designation ?? "",
     department: c.department ?? "",
+    departmentSubtype: c.departmentSubtype ?? "",
     customerNumber: c.customer?.customerNumber ?? "",
     customerEmail: c.customer?.email ?? "",
     interest: interestFromScore(c.relationshipScore),
@@ -413,8 +469,12 @@ export async function importContactsFromRows(
         if (phone) patch.phone = phone;
         const whatsapp = pickColumn(row, "whatsapp");
         if (whatsapp) patch.whatsapp = whatsapp;
-        const department = pickColumn(row, "department");
+        const department = normalizeDepartmentValue(
+          pickColumn(row, "department"),
+        );
         if (department) patch.department = department;
+        const departmentSubtype = pickColumn(row, "departmentSubtype");
+        if (departmentSubtype) patch.departmentSubtype = departmentSubtype;
         if (customerId) patch.customerId = customerId;
         if (interest) patch.relationshipScore = INTEREST_SCORES[interest];
         const linkedinUrl = pickColumn(row, "linkedinUrl");
@@ -437,7 +497,11 @@ export async function importContactsFromRows(
             email,
             phone,
             whatsapp: pickColumn(row, "whatsapp") || null,
-            department: pickColumn(row, "department") || null,
+            department: normalizeDepartmentValue(
+              pickColumn(row, "department"),
+            ),
+            departmentSubtype:
+              pickColumn(row, "departmentSubtype") || null,
             customerId,
             relationshipScore: interest
               ? INTEREST_SCORES[interest]

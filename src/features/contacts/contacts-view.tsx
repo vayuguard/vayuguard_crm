@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -48,6 +49,11 @@ import {
   type ScannedContact,
 } from "@/features/contacts/card-scan-dialog";
 import { BulkExcelActions } from "@/components/shared/bulk-excel-actions";
+import {
+  CONTACT_DEPARTMENTS,
+  formatDepartmentDisplay,
+  subtypesForDepartment,
+} from "@/lib/contact-departments";
 
 const CONTACTS_PAGE_SIZE = 50;
 
@@ -63,6 +69,7 @@ type Contact = {
   designation?: string | null;
   title?: string | null;
   department?: string | null;
+  departmentSubtype?: string | null;
   relationshipScore?: number | null;
   customerId?: string | null;
   linkedinUrl?: string | null;
@@ -71,7 +78,10 @@ type Contact = {
   notes?: string | null;
   customer?: { id?: string; name?: string } | null;
   tags?: { tag?: { id: string; name: string } | null }[];
+  createdBy?: { id?: string; name?: string | null; email?: string | null } | null;
+  updatedBy?: { id?: string; name?: string | null; email?: string | null } | null;
   createdAt?: string;
+  updatedAt?: string;
 };
 
 type CustomerOption = { id: string; name: string };
@@ -114,6 +124,7 @@ const contactFormSchema = z.object({
   whatsapp: z.string().optional(),
   birthday: z.string().optional(),
   department: z.string().optional(),
+  departmentSubtype: z.string().optional(),
   customerId: z.string().optional(),
   linkedinUrl: z.string().optional(),
   twitterUrl: z.string().optional(),
@@ -139,6 +150,7 @@ const emptyForm: ContactFormValues = {
   whatsapp: "",
   birthday: "",
   department: "",
+  departmentSubtype: "",
   customerId: "",
   linkedinUrl: "",
   twitterUrl: "",
@@ -149,6 +161,9 @@ const emptyForm: ContactFormValues = {
 };
 
 function toPayload(values: ContactFormValues) {
+  const needsSubtype = ["contractor", "gov", "management_company"].includes(
+    values.department ?? "",
+  );
   return {
     name: values.name,
     designation: values.designation || null,
@@ -157,6 +172,9 @@ function toPayload(values: ContactFormValues) {
     whatsapp: values.whatsapp || null,
     birthday: values.birthday || null,
     department: values.department || null,
+    departmentSubtype: needsSubtype
+      ? values.departmentSubtype || null
+      : null,
     customerId: values.customerId || null,
     linkedinUrl: values.linkedinUrl || null,
     twitterUrl: values.twitterUrl || null,
@@ -165,6 +183,12 @@ function toPayload(values: ContactFormValues) {
     relationshipScore: scoreFromInterest(values.interest),
     tags: values.tags || "",
   };
+}
+
+function actorLabel(
+  user?: { name?: string | null; email?: string | null } | null,
+) {
+  return user?.name?.trim() || user?.email || null;
 }
 
 /** Strips legal suffixes and punctuation so "Acme Pvt. Ltd." ≈ "Acme". */
@@ -406,16 +430,23 @@ export function ContactsView() {
         ? String(contact.birthday).slice(0, 10)
         : "",
       department: contact.department ?? "",
+      departmentSubtype: contact.departmentSubtype ?? "",
       customerId: contact.customerId ?? contact.customer?.id ?? "",
       linkedinUrl: contact.linkedinUrl ?? "",
       twitterUrl: contact.twitterUrl ?? "",
       facebookUrl: contact.facebookUrl ?? "",
       notes: contact.notes ?? "",
       interest: interestFromScore(contact.relationshipScore),
-      tags: tagNames,
+      tags: tagNames
+        .split(", ")
+        .filter((t) => t && !t.startsWith("by:"))
+        .join(", "),
     });
     setDialogOpen(true);
   }
+
+  const selectedDepartment = form.watch("department");
+  const subtypeOptions = subtypesForDepartment(selectedDepartment);
 
   const columns: DataTableColumn<Contact>[] = [
     {
@@ -433,12 +464,18 @@ export function ContactsView() {
         </div>
       ),
     },
+    {
+      id: "company",
+      header: "Company",
+      cell: (r) => r.customer?.name ?? "—",
+    },
     { id: "email", header: "Email", cell: (r) => r.email ?? "—" },
     { id: "phone", header: "Phone", cell: (r) => r.phone ?? "—" },
     {
       id: "department",
       header: "Department",
-      cell: (r) => r.department ?? "—",
+      cell: (r) =>
+        formatDepartmentDisplay(r.department, r.departmentSubtype),
     },
     {
       id: "interest",
@@ -446,9 +483,36 @@ export function ContactsView() {
       cell: (r) => interestLabel(r.relationshipScore),
     },
     {
-      id: "customer",
-      header: "Customer",
-      cell: (r) => r.customer?.name ?? "—",
+      id: "by",
+      header: "Added by",
+      cell: (r) => {
+        const created = actorLabel(r.createdBy);
+        const updated = actorLabel(r.updatedBy);
+        const byTags =
+          r.tags
+            ?.map((t) => t.tag?.name)
+            .filter((n): n is string => !!n?.startsWith("by:")) ?? [];
+        return (
+          <div className="flex max-w-[11rem] flex-col gap-1">
+            {created ? (
+              <Badge variant="secondary" className="w-fit font-normal">
+                {created}
+              </Badge>
+            ) : byTags[0] ? (
+              <Badge variant="secondary" className="w-fit font-normal">
+                {byTags[0].replace(/^by:/, "")}
+              </Badge>
+            ) : (
+              <span>—</span>
+            )}
+            {updated && updated !== created ? (
+              <span className="text-[10px] text-muted-foreground">
+                Updated by {updated}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
     },
     { id: "created", header: "Created", cell: (r) => formatDate(r.createdAt) },
     {
@@ -597,8 +661,58 @@ export function ContactsView() {
                 <Input {...form.register("designation")} />
               </Field>
               <Field label="Department">
-                <Input {...form.register("department")} />
+                <Select
+                  value={form.watch("department") || "__none__"}
+                  onValueChange={(v) => {
+                    const next = v === "__none__" ? "" : (v ?? "");
+                    form.setValue("department", next);
+                    form.setValue("departmentSubtype", "");
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select department…" />
+                  </SelectTrigger>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className="z-[200]"
+                  >
+                    <SelectItem value="__none__">None</SelectItem>
+                    {CONTACT_DEPARTMENTS.map((d) => (
+                      <SelectItem key={d.value} value={d.value}>
+                        {d.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
+              {subtypeOptions.length > 0 ? (
+                <Field label="Department subtype">
+                  <Select
+                    value={form.watch("departmentSubtype") || "__none__"}
+                    onValueChange={(v) =>
+                      form.setValue(
+                        "departmentSubtype",
+                        v === "__none__" ? "" : (v ?? ""),
+                      )
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select subtype…" />
+                    </SelectTrigger>
+                    <SelectContent
+                      alignItemWithTrigger={false}
+                      className="z-[200]"
+                    >
+                      <SelectItem value="__none__">None</SelectItem>
+                      {subtypeOptions.map((s) => (
+                        <SelectItem key={s.value} value={s.value}>
+                          {s.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : null}
               <Field label="Email" error={form.formState.errors.email?.message}>
                 <Input type="email" {...form.register("email")} />
               </Field>
@@ -612,7 +726,7 @@ export function ContactsView() {
                 <Input type="date" {...form.register("birthday")} />
               </Field>
               <Field
-                label="Customer (company account)"
+                label="Company (customer account)"
                 error={
                   customersQuery.isError
                     ? (customersQuery.error as Error).message
@@ -629,7 +743,7 @@ export function ContactsView() {
                   }
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Link to a customer…" />
+                    <SelectValue placeholder="Link to a company…" />
                   </SelectTrigger>
                   <SelectContent
                     alignItemWithTrigger={false}
@@ -638,7 +752,7 @@ export function ContactsView() {
                     <SelectItem value="__none__">None</SelectItem>
                     {customersQuery.isLoading ? (
                       <SelectItem value="__loading__" disabled>
-                        Loading customers…
+                        Loading companies…
                       </SelectItem>
                     ) : null}
                     {(customersQuery.data ?? []).map((c) => (
@@ -649,8 +763,8 @@ export function ContactsView() {
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  Optional — which company this person belongs to. Create
-                  customers under Customers first if the list is empty.
+                  Optional — company this person belongs to. Create customers
+                  under Customers first if the list is empty.
                 </p>
               </Field>
               <Field label="Interest">

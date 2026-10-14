@@ -66,6 +66,8 @@ model User {
   quotationsApproved    Quotation[]              @relation("QuotationApprover")
   invoicesCreated       Invoice[]                @relation("InvoiceCreatedBy")
   campaignsCreated      Campaign[]               @relation("CampaignCreatedBy")
+  contactsCreated       Contact[]                @relation("ContactCreatedBy")
+  contactsUpdated       Contact[]                @relation("ContactUpdatedBy")
 
   @@index([roleId])
   @@index([deletedAt])
@@ -354,6 +356,8 @@ model Contact {
   whatsapp          String?
   birthday          DateTime?
   department        String?
+  /// Sub-type when department is contractor / gov / management_company
+  departmentSubtype String?
   customerId        String?
   customer          Customer? @relation(fields: [customerId], references: [id])
   linkedinUrl       String?
@@ -362,7 +366,9 @@ model Contact {
   notes             String?   @db.Text
   relationshipScore Int       @default(50)
   createdById       String?
+  createdBy         User?     @relation("ContactCreatedBy", fields: [createdById], references: [id])
   updatedById       String?
+  updatedBy         User?     @relation("ContactUpdatedBy", fields: [updatedById], references: [id])
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
@@ -371,6 +377,7 @@ model Contact {
 
   @@index([customerId])
   @@index([email])
+  @@index([department])
   @@index([deletedAt])
 }
 
