@@ -34,6 +34,7 @@ import { usePermissions } from "@/hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -64,6 +65,17 @@ const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE", "CANCELLED"] as const;
 const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const;
 const RECURRENCE_PATTERNS = ["daily", "weekly", "monthly", "yearly"] as const;
 
+type UserLite = { id?: string; name?: string | null; email?: string | null };
+
+type AssignmentEvent = {
+  id: string;
+  createdAt: string;
+  note?: string | null;
+  assignedBy?: UserLite | null;
+  assignedTo?: UserLite | null;
+  previousAssignee?: UserLite | null;
+};
+
 type Task = {
   id: string;
   title: string;
@@ -72,12 +84,21 @@ type Task = {
   dueAt?: string | null;
   dueDate?: string | null;
   type?: string | null;
-  assignedTo?: { name?: string } | null;
+  assignedToId?: string | null;
+  assignedTo?: UserLite | null;
   recurrence?: {
     pattern?: string;
     interval?: number;
     until?: string | null;
   } | null;
+  assignmentHistory?: AssignmentEvent[];
+};
+
+type AssigneeOption = {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  role?: { name?: string } | null;
 };
 
 type TaskFormValues = {
@@ -86,6 +107,8 @@ type TaskFormValues = {
   status: (typeof TASK_STATUSES)[number];
   priority: (typeof TASK_PRIORITIES)[number];
   dueAt: string;
+  assignedToId: string;
+  assignmentNote: string;
   recurrenceEnabled: boolean;
   recurrencePattern: (typeof RECURRENCE_PATTERNS)[number];
   recurrenceInterval: number;
@@ -113,6 +136,8 @@ const emptyForm: TaskFormValues = {
   status: "TODO",
   priority: "MEDIUM",
   dueAt: "",
+  assignedToId: "",
+  assignmentNote: "",
   recurrenceEnabled: false,
   recurrencePattern: "weekly",
   recurrenceInterval: 1,
@@ -133,6 +158,9 @@ export function TasksView() {
   const [deleting, setDeleting] = React.useState<Task | null>(null);
   const [form, setForm] = React.useState<TaskFormValues>(emptyForm);
   const [activeId, setActiveId] = React.useState<string | null>(null);
+  const [assignmentHistory, setAssignmentHistory] = React.useState<
+    AssignmentEvent[]
+  >([]);
 
   React.useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 250);
@@ -151,6 +179,15 @@ export function TasksView() {
     },
   });
 
+  const assigneesQuery = useQuery({
+    queryKey: ["assignees"],
+    queryFn: async () => {
+      const res = await apiFetch<unknown>("/api/assignees");
+      return unwrapList<AssigneeOption>(res.data);
+    },
+    enabled: dialogOpen && can("tasks:write"),
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (values: TaskFormValues) => {
       const payload: Record<string, unknown> = {
@@ -159,6 +196,8 @@ export function TasksView() {
         status: values.status,
         priority: values.priority,
         dueAt: values.dueAt || null,
+        assignedToId: values.assignedToId || null,
+        assignmentNote: values.assignmentNote.trim() || null,
         recurrence: values.recurrenceEnabled
           ? {
               pattern: values.recurrencePattern,
@@ -185,6 +224,7 @@ export function TasksView() {
       setDialogOpen(false);
       setEditing(null);
       setForm(emptyForm);
+      setAssignmentHistory([]);
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -219,13 +259,28 @@ export function TasksView() {
   );
   const activeTask = tasks.find((t) => t.id === activeId) ?? null;
 
+  function personLabel(u?: UserLite | null) {
+    if (!u) return "Unassigned";
+    return u.name?.trim() || u.email || "Unknown";
+  }
+
+  function formatTimestamp(value?: string | null) {
+    if (!value) return "—";
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return value;
+    }
+  }
+
   function openCreate() {
     setEditing(null);
     setForm(emptyForm);
+    setAssignmentHistory([]);
     setDialogOpen(true);
   }
 
-  function openEdit(task: Task) {
+  async function openEdit(task: Task) {
     setEditing(task);
     setForm({
       title: task.title,
@@ -235,6 +290,8 @@ export function TasksView() {
       dueAt: task.dueAt
         ? new Date(task.dueAt).toISOString().slice(0, 16)
         : "",
+      assignedToId: task.assignedToId ?? task.assignedTo?.id ?? "",
+      assignmentNote: "",
       recurrenceEnabled: !!task.recurrence,
       recurrencePattern:
         (task.recurrence?.pattern as TaskFormValues["recurrencePattern"]) ||
@@ -244,7 +301,24 @@ export function TasksView() {
         ? new Date(task.recurrence.until).toISOString().slice(0, 10)
         : "",
     });
+    setAssignmentHistory(task.assignmentHistory ?? []);
     setDialogOpen(true);
+    try {
+      const res = await apiFetch<Task>(`/api/tasks/${task.id}`);
+      const detail = res.data;
+      if (detail?.assignmentHistory) {
+        setAssignmentHistory(detail.assignmentHistory);
+      }
+      if (detail) {
+        setEditing(detail);
+        setForm((f) => ({
+          ...f,
+          assignedToId: detail.assignedToId ?? detail.assignedTo?.id ?? "",
+        }));
+      }
+    } catch {
+      // keep list payload if detail fetch fails
+    }
   }
 
   function onDragEnd(event: DragEndEvent) {
@@ -296,7 +370,10 @@ export function TasksView() {
     {
       id: "assignee",
       header: "Assignee",
-      cell: (r) => r.assignedTo?.name ?? "—",
+      cell: (r) =>
+        r.assignedTo?.name?.trim() ||
+        r.assignedTo?.email ||
+        "Unassigned",
     },
     {
       id: "due",
@@ -538,7 +615,93 @@ export function TasksView() {
                   }
                 />
               </Field>
+              <Field label="Assign to">
+                <Select
+                  value={form.assignedToId || "__none__"}
+                  onValueChange={(v) =>
+                    setForm((f) => ({
+                      ...f,
+                      assignedToId: v === "__none__" ? "" : (v ?? ""),
+                    }))
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Unassigned" />
+                  </SelectTrigger>
+                  <SelectContent
+                    alignItemWithTrigger={false}
+                    className="z-[200]"
+                  >
+                    <SelectItem value="__none__">Unassigned</SelectItem>
+                    {assigneesQuery.isLoading ? (
+                      <SelectItem value="__loading__" disabled>
+                        Loading people…
+                      </SelectItem>
+                    ) : null}
+                    {(assigneesQuery.data ?? []).map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name?.trim() || u.email || u.id}
+                        {u.role?.name ? ` · ${u.role.name}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
             </div>
+
+            <Field label="Assignment note (optional)">
+              <Textarea
+                rows={2}
+                value={form.assignmentNote}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, assignmentNote: e.target.value }))
+                }
+                placeholder="e.g. Please call the client by Friday and share update…"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Saved in the assignment history with who assigned whom and the
+                timestamp.
+              </p>
+            </Field>
+
+            {editing ? (
+              <div className="space-y-2 rounded-lg border border-border p-3">
+                <p className="text-sm font-medium">Assignment history</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Full track of who assigned this task to whom, with timestamps.
+                </p>
+                {assignmentHistory.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No assignment events yet.
+                  </p>
+                ) : (
+                  <ol className="max-h-48 space-y-2 overflow-y-auto border-l border-border pl-3">
+                    {assignmentHistory.map((ev) => (
+                      <li key={ev.id} className="relative text-xs">
+                        <span className="absolute -left-[0.91rem] top-1 size-2 rounded-full bg-primary" />
+                        <p className="font-medium text-foreground">
+                          {personLabel(ev.assignedBy)} →{" "}
+                          {personLabel(ev.assignedTo)}
+                        </p>
+                        {ev.previousAssignee ? (
+                          <p className="text-muted-foreground">
+                            Was: {personLabel(ev.previousAssignee)}
+                          </p>
+                        ) : null}
+                        {ev.note ? (
+                          <p className="mt-0.5 rounded-md bg-muted/50 px-2 py-1 text-foreground/90">
+                            {ev.note}
+                          </p>
+                        ) : null}
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatTimestamp(ev.createdAt)}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            ) : null}
 
             <div className="space-y-3 rounded-lg border border-border p-3">
               <label className="flex items-center gap-2 text-sm">
