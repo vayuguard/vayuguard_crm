@@ -4,10 +4,17 @@ import { prisma } from "@/server/db/client";
 import { notFound } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
 import {
+  applyMineScope,
+  assertMine,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+import {
   cuidSchema,
   emptyToNull,
   optionalCuid,
 } from "@/lib/validators/common";
+
+const DOCUMENT_OWNER_KEYS = ["uploadedById"] as const;
 
 export const createDocumentSchema = z.object({
   name: z.string().trim().min(1).max(255),
@@ -44,6 +51,7 @@ const documentInclude = {
 function buildWhere(
   filters: DocumentFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.DocumentWhereInput {
   const where: Prisma.DocumentWhereInput = { deletedAt: null };
   if (filters.category) where.category = filters.category;
@@ -52,19 +60,25 @@ function buildWhere(
   if (filters.ticketId) where.ticketId = filters.ticketId;
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { name: { contains: term, mode: "insensitive" } },
-      { fileType: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { name: { contains: term, mode: "insensitive" } },
+          { fileType: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...DOCUMENT_OWNER_KEYS]);
 }
 
 export async function listDocuments(
   pagination: PaginationInput,
   filters: DocumentFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.document.count({ where }),
     prisma.document.findMany({
@@ -78,12 +92,18 @@ export async function listDocuments(
   return { items, total };
 }
 
-export async function getDocumentById(id: string) {
+export async function getDocumentById(id: string, scope?: TeamRecordScope) {
   const document = await prisma.document.findFirst({
     where: { id, deletedAt: null },
     include: documentInclude,
   });
   if (!document) throw notFound("Document not found");
+  assertMine(
+    document,
+    scope,
+    [...DOCUMENT_OWNER_KEYS],
+    "You can only access your own documents",
+  );
   return document;
 }
 
@@ -119,12 +139,19 @@ export async function updateDocument(
   id: string,
   input: UpdateDocumentInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.document.findFirst({
     where: { id, deletedAt: null },
     include: { versions: { orderBy: { version: "desc" }, take: 1 } },
   });
   if (!existing) throw notFound("Document not found");
+  assertMine(
+    existing,
+    scope,
+    [...DOCUMENT_OWNER_KEYS],
+    "You can only access your own documents",
+  );
 
   return prisma.$transaction(async (tx) => {
     if (input.fileUrl && input.fileUrl !== existing.fileUrl) {
@@ -157,11 +184,17 @@ export async function updateDocument(
   });
 }
 
-export async function deleteDocument(id: string) {
+export async function deleteDocument(id: string, scope?: TeamRecordScope) {
   const existing = await prisma.document.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Document not found");
+  assertMine(
+    existing,
+    scope,
+    [...DOCUMENT_OWNER_KEYS],
+    "You can only access your own documents",
+  );
 
   return prisma.document.update({
     where: { id },

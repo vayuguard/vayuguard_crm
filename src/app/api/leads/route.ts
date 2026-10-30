@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { ok, created, fail } from "@/server/api/response";
 import { getPagination, paginateMeta } from "@/server/api/pagination";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { createLead, listLeads } from "@/server/services/leads.service";
 import { createLeadSchema, leadFiltersSchema } from "@/lib/validators/lead";
@@ -10,11 +11,15 @@ import { searchParamsObject } from "@/lib/validators/common";
 
 export async function GET(request: NextRequest) {
   try {
-    await requirePermission("leads:read");
+    const session = await requirePermission("leads:read");
     const { searchParams } = request.nextUrl;
     const pagination = getPagination(searchParams);
     const filters = leadFiltersSchema.parse(searchParamsObject(searchParams));
-    const { items, total } = await listLeads(pagination, filters);
+    const { items, total } = await listLeads(
+      pagination,
+      filters,
+      (await teamRecordScope(session)),
+    );
     return ok(items, paginateMeta(total, pagination.page, pagination.pageSize));
   } catch (error) {
     return fail(error);

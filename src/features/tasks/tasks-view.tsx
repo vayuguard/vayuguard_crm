@@ -59,6 +59,7 @@ import {
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { OwnerBadge } from "@/components/shared/owner-badge";
 
 const TASK_TYPES = ["TASK", "CALL", "MEETING", "REMINDER", "FOLLOW_UP"] as const;
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE", "CANCELLED"] as const;
@@ -280,6 +281,14 @@ export function TasksView() {
     setDialogOpen(true);
   }
 
+  React.useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "1") {
+      setEditing(null);
+      setDialogOpen(true);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
+
   async function openEdit(task: Task) {
     setEditing(task);
     setForm({
@@ -369,11 +378,8 @@ export function TasksView() {
     },
     {
       id: "assignee",
-      header: "Assignee",
-      cell: (r) =>
-        r.assignedTo?.name?.trim() ||
-        r.assignedTo?.email ||
-        "Unassigned",
+      header: "Handled by",
+      cell: (r) => <OwnerBadge person={r.assignedTo} compact />,
     },
     {
       id: "due",
@@ -916,6 +922,7 @@ function TaskCard({
             {formatDate(task.dueAt ?? task.dueDate)}
           </p>
         ) : null}
+        <OwnerBadge person={task.assignedTo} compact />
       </CardContent>
     </Card>
   );

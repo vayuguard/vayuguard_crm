@@ -6,6 +6,12 @@ import {
 import { prisma } from "@/server/db/client";
 import { notFound, validationError } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
+import {
+  applyMineScope,
+  assertMine,
+  canFilterByUser,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
 import type {
   BulkUpdateLeadsInput,
   CreateLeadActivityInput,
@@ -15,6 +21,8 @@ import type {
   MergeLeadsInput,
   UpdateLeadInput,
 } from "@/lib/validators/lead";
+
+const LEAD_OWNER_KEYS = ["assignedToId", "createdById"] as const;
 
 const leadInclude = {
   assignedTo: { select: { id: true, name: true, email: true, image: true } },
@@ -72,13 +80,16 @@ export async function nextCustomerNumber() {
 function buildLeadWhere(
   filters: LeadFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.LeadWhereInput {
   const where: Prisma.LeadWhereInput = { deletedAt: null };
 
   if (filters.status) where.status = filters.status;
   if (filters.priority) where.priority = filters.priority;
   if (filters.source) where.source = filters.source;
-  if (filters.assignedToId) where.assignedToId = filters.assignedToId;
+  if (canFilterByUser(scope, filters.assignedToId)) {
+    where.assignedToId = filters.assignedToId;
+  }
   if (filters.campaignId) where.campaignId = filters.campaignId;
   if (filters.city) where.city = { contains: filters.city, mode: "insensitive" };
   if (filters.state) where.state = { contains: filters.state, mode: "insensitive" };
@@ -96,18 +107,23 @@ function buildLeadWhere(
 
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { name: { contains: term, mode: "insensitive" } },
-      { company: { contains: term, mode: "insensitive" } },
-      { email: { contains: term, mode: "insensitive" } },
-      { phone: { contains: term, mode: "insensitive" } },
-      { leadNumber: { contains: term, mode: "insensitive" } },
-      { city: { contains: term, mode: "insensitive" } },
-      { source: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { name: { contains: term, mode: "insensitive" } },
+          { company: { contains: term, mode: "insensitive" } },
+          { email: { contains: term, mode: "insensitive" } },
+          { phone: { contains: term, mode: "insensitive" } },
+          { leadNumber: { contains: term, mode: "insensitive" } },
+          { city: { contains: term, mode: "insensitive" } },
+          { source: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
 
-  return where;
+  return applyMineScope(where, scope, [...LEAD_OWNER_KEYS]);
 }
 
 const SORTABLE: Record<string, Prisma.LeadOrderByWithRelationInput> = {
@@ -160,8 +176,9 @@ async function resolveTagIds(
 export async function listLeads(
   pagination: PaginationInput,
   filters: LeadFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildLeadWhere(filters, pagination.q);
+  const where = buildLeadWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.lead.count({ where }),
     prisma.lead.findMany({
@@ -176,7 +193,7 @@ export async function listLeads(
   return { items, total };
 }
 
-export async function getLeadById(id: string) {
+export async function getLeadById(id: string, scope?: TeamRecordScope) {
   const lead = await prisma.lead.findFirst({
     where: { id, deletedAt: null },
     include: {
@@ -205,6 +222,7 @@ export async function getLeadById(id: string) {
   });
 
   if (!lead) throw notFound("Lead not found");
+  assertMine(lead, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
   return lead;
 }
 
@@ -268,11 +286,13 @@ export async function updateLead(
   id: string,
   input: UpdateLeadInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.lead.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Lead not found");
+  assertMine(existing, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
 
   const { tagIds, tags, ...data } = input;
 
@@ -331,11 +351,16 @@ export async function updateLead(
   return lead;
 }
 
-export async function deleteLead(id: string, userId: string) {
+export async function deleteLead(
+  id: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.lead.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Lead not found");
+  assertMine(existing, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
 
   const lead = await prisma.$transaction(async (tx) => {
     const deleted = await tx.lead.update({
@@ -359,7 +384,11 @@ export async function deleteLead(id: string, userId: string) {
   return lead;
 }
 
-export async function mergeLeads(input: MergeLeadsInput, userId: string) {
+export async function mergeLeads(
+  input: MergeLeadsInput,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const { primaryId, mergeIds } = input;
   const uniqueMergeIds = [...new Set(mergeIds.filter((id) => id !== primaryId))];
   if (uniqueMergeIds.length === 0) {
@@ -371,6 +400,7 @@ export async function mergeLeads(input: MergeLeadsInput, userId: string) {
     include: { tags: true },
   });
   if (!primary) throw notFound("Primary lead not found");
+  assertMine(primary, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
 
   const duplicates = await prisma.lead.findMany({
     where: { id: { in: uniqueMergeIds }, deletedAt: null },
@@ -378,6 +408,9 @@ export async function mergeLeads(input: MergeLeadsInput, userId: string) {
   });
   if (duplicates.length !== uniqueMergeIds.length) {
     throw notFound("One or more merge leads were not found");
+  }
+  for (const dup of duplicates) {
+    assertMine(dup, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
   }
 
   const fill = <T>(current: T | null | undefined, next: T | null | undefined) =>
@@ -496,18 +529,22 @@ export async function mergeLeads(input: MergeLeadsInput, userId: string) {
     });
   });
 
-  return getLeadById(primaryId);
+  return getLeadById(primaryId, scope);
 }
 
 export async function bulkUpdateLeads(
   input: BulkUpdateLeadsInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const leads = await prisma.lead.findMany({
     where: { id: { in: input.ids }, deletedAt: null },
-    select: { id: true },
+    select: { id: true, assignedToId: true, createdById: true },
   });
   if (leads.length === 0) throw notFound("No matching leads found");
+  for (const lead of leads) {
+    assertMine(lead, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
+  }
 
   const ids = leads.map((l) => l.id);
   const data = {
@@ -542,12 +579,17 @@ export async function bulkUpdateLeads(
   return { updatedCount: ids.length, ids };
 }
 
-export async function listLeadActivities(leadId: string, pagination: PaginationInput) {
+export async function listLeadActivities(
+  leadId: string,
+  pagination: PaginationInput,
+  scope?: TeamRecordScope,
+) {
   const lead = await prisma.lead.findFirst({
     where: { id: leadId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, assignedToId: true, createdById: true },
   });
   if (!lead) throw notFound("Lead not found");
+  assertMine(lead, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
 
   const where = { leadId };
   const [total, items] = await Promise.all([
@@ -570,12 +612,14 @@ export async function createLeadActivity(
   leadId: string,
   input: CreateLeadActivityInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const lead = await prisma.lead.findFirst({
     where: { id: leadId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, assignedToId: true, createdById: true },
   });
   if (!lead) throw notFound("Lead not found");
+  assertMine(lead, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
 
   return prisma.leadActivity.create({
     data: {
@@ -596,12 +640,14 @@ export async function createLeadAttachment(
   leadId: string,
   input: CreateLeadAttachmentInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const lead = await prisma.lead.findFirst({
     where: { id: leadId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, assignedToId: true, createdById: true },
   });
   if (!lead) throw notFound("Lead not found");
+  assertMine(lead, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
 
   const attachment = await prisma.leadAttachment.create({
     data: {
@@ -634,11 +680,13 @@ export async function convertLeadToCustomer(
   leadId: string,
   userId: string,
   options: { createContact?: boolean; notes?: string | null } = {},
+  scope?: TeamRecordScope,
 ) {
   const lead = await prisma.lead.findFirst({
     where: { id: leadId, deletedAt: null },
   });
   if (!lead) throw notFound("Lead not found");
+  assertMine(lead, scope, [...LEAD_OWNER_KEYS], "You can only access your own leads");
   if (lead.customerId) {
     throw validationError("Lead is already converted to a customer", {
       customerId: lead.customerId,
@@ -835,8 +883,12 @@ export async function importLeadsFromRows(
   return results;
 }
 
-export async function exportLeads(filters: LeadFilters = {}, q?: string) {
-  const where = buildLeadWhere(filters, q);
+export async function exportLeads(
+  filters: LeadFilters = {},
+  q?: string,
+  scope?: TeamRecordScope,
+) {
+  const where = buildLeadWhere(filters, q, scope);
   const leads = await prisma.lead.findMany({
     where,
     include: {

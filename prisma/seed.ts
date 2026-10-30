@@ -128,6 +128,18 @@ async function seedUsers() {
     createdUsers.push(user);
   }
 
+  // Sales executives report to the sales manager, so the manager sees their work.
+  const manager = createdUsers.find((u) => u.email === "manager@vayuguard.com");
+  if (manager) {
+    const reportIds = createdUsers
+      .filter((u) => u.email.startsWith("sales"))
+      .map((u) => u.id);
+    await prisma.employeeProfile.updateMany({
+      where: { userId: { in: reportIds } },
+      data: { managerId: manager.id },
+    });
+  }
+
   return createdUsers;
 }
 

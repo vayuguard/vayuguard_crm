@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { convertContactToCustomer } from "@/server/services/contacts.service";
 import { getClientIp } from "@/server/api/rate-limit";
@@ -29,6 +30,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       id,
       session.user.id,
       options,
+      (await teamRecordScope(session)),
     );
 
     await writeAuditLog({

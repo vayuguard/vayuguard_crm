@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteContact,
@@ -14,9 +15,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("contacts:read");
+    const session = await requirePermission("contacts:read");
     const { id } = await params;
-    return ok(await getContactById(id));
+    return ok(await getContactById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -27,7 +28,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const session = await requirePermission("contacts:write");
     const { id } = await params;
     const body = updateContactSchema.parse(await request.json());
-    const contact = await updateContact(id, body, session.user.id);
+    const contact = await updateContact(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "CONTACT_UPDATE",
@@ -49,7 +55,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("contacts:delete");
     const { id } = await params;
-    const contact = await deleteContact(id, session.user.id);
+    const contact = await deleteContact(
+      id,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "CONTACT_DELETE",

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteCampaign,
@@ -18,9 +19,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("campaigns:read");
+    const session = await requirePermission("campaigns:read");
     const { id } = await params;
-    return ok(await getCampaignById(id));
+    return ok(await getCampaignById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -30,13 +31,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("campaigns:write");
     const { id } = await params;
+    const scope = (await teamRecordScope(session));
     const raw = await request.json();
     const body = updateCampaignSchema.parse(raw);
-    const campaign = await updateCampaign(id, body, session.user.id);
+    const campaign = await updateCampaign(id, body, session.user.id, scope);
 
     if (raw.metrics) {
       const metrics = updateCampaignMetricsSchema.parse(raw.metrics);
-      await updateCampaignMetrics(id, metrics);
+      await updateCampaignMetrics(id, metrics, scope);
     }
 
     await writeAuditLog({
@@ -49,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       metadata: body,
     });
 
-    return ok(await getCampaignById(id));
+    return ok(await getCampaignById(id, scope));
   } catch (error) {
     return fail(error);
   }
@@ -59,7 +61,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("campaigns:write");
     const { id } = await params;
-    const campaign = await deleteCampaign(id);
+    const campaign = await deleteCampaign(id, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "CAMPAIGN_DELETE",

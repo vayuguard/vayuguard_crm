@@ -33,7 +33,7 @@ export function Breadcrumbs({ className }: { className?: string }) {
       className={cn("mb-4 flex items-center gap-1 text-sm", className)}
     >
       <Link
-        href="/dashboard"
+        href="/"
         className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
       >
         <Home className="size-3.5" />

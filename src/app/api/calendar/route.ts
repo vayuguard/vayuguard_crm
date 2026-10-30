@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, created, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   calendarQuerySchema,
@@ -13,11 +14,11 @@ import { searchParamsObject } from "@/lib/validators/common";
 
 export async function GET(request: NextRequest) {
   try {
-    await requirePermission("tasks:read");
+    const session = await requirePermission("tasks:read");
     const query = calendarQuerySchema.parse(
       searchParamsObject(request.nextUrl.searchParams),
     );
-    const feed = await getCalendarFeed(query);
+    const feed = await getCalendarFeed(query, (await teamRecordScope(session)));
     return ok(feed);
   } catch (error) {
     return fail(error);

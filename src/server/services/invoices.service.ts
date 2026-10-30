@@ -7,6 +7,11 @@ import { prisma } from "@/server/db/client";
 import { notFound, validationError } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
 import {
+  applyMineScope,
+  assertMine,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+import {
   calcDocumentTotals,
 } from "@/server/services/quotations.service";
 import type {
@@ -15,6 +20,8 @@ import type {
   InvoiceFilters,
   UpdateInvoiceInput,
 } from "@/lib/validators/invoice";
+
+const INVOICE_OWNER_KEYS = ["createdById"] as const;
 
 const invoiceInclude = {
   customer: {
@@ -114,6 +121,7 @@ export function resolvePaymentStatus(
 function buildWhere(
   filters: InvoiceFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.InvoiceWhereInput {
   const where: Prisma.InvoiceWhereInput = { deletedAt: null };
   if (filters.status) where.status = filters.status;
@@ -126,20 +134,26 @@ function buildWhere(
   }
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { invoiceNumber: { contains: term, mode: "insensitive" } },
-      { notes: { contains: term, mode: "insensitive" } },
-      { customer: { name: { contains: term, mode: "insensitive" } } },
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { invoiceNumber: { contains: term, mode: "insensitive" } },
+          { notes: { contains: term, mode: "insensitive" } },
+          { customer: { name: { contains: term, mode: "insensitive" } } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...INVOICE_OWNER_KEYS]);
 }
 
 export async function listInvoices(
   pagination: PaginationInput,
   filters: InvoiceFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.invoice.count({ where }),
     prisma.invoice.findMany({
@@ -153,12 +167,18 @@ export async function listInvoices(
   return { items, total };
 }
 
-export async function getInvoiceById(id: string) {
+export async function getInvoiceById(id: string, scope?: TeamRecordScope) {
   const invoice = await prisma.invoice.findFirst({
     where: { id, deletedAt: null },
     include: invoiceInclude,
   });
   if (!invoice) throw notFound("Invoice not found");
+  assertMine(
+    invoice,
+    scope,
+    [...INVOICE_OWNER_KEYS],
+    "You can only access your own invoices",
+  );
   return invoice;
 }
 
@@ -218,12 +238,19 @@ export async function createInvoiceFromQuotation(
   quotationId: string,
   userId: string,
   options: { dueDate?: Date; notes?: string | null } = {},
+  scope?: TeamRecordScope,
 ) {
   const quotation = await prisma.quotation.findFirst({
     where: { id: quotationId, deletedAt: null },
     include: { items: true },
   });
   if (!quotation) throw notFound("Quotation not found");
+  assertMine(
+    quotation,
+    scope,
+    ["createdById"],
+    "You can only access your own quotations",
+  );
   if (!quotation.customerId) {
     throw validationError("Quotation has no customer");
   }
@@ -263,11 +290,18 @@ export async function updateInvoice(
   id: string,
   input: UpdateInvoiceInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.invoice.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Invoice not found");
+  assertMine(
+    existing,
+    scope,
+    [...INVOICE_OWNER_KEYS],
+    "You can only access your own invoices",
+  );
   if (existing.status === InvoiceStatus.PAID) {
     throw validationError("Paid invoices cannot be edited");
   }
@@ -337,11 +371,21 @@ export async function updateInvoice(
   });
 }
 
-export async function deleteInvoice(id: string, userId: string) {
+export async function deleteInvoice(
+  id: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.invoice.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Invoice not found");
+  assertMine(
+    existing,
+    scope,
+    [...INVOICE_OWNER_KEYS],
+    "You can only access your own invoices",
+  );
 
   return prisma.invoice.update({
     where: { id },
@@ -353,11 +397,18 @@ export async function recordPayment(
   invoiceId: string,
   input: CreatePaymentInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const invoice = await prisma.invoice.findFirst({
     where: { id: invoiceId, deletedAt: null },
   });
   if (!invoice) throw notFound("Invoice not found");
+  assertMine(
+    invoice,
+    scope,
+    [...INVOICE_OWNER_KEYS],
+    "You can only access your own invoices",
+  );
   if (invoice.status === InvoiceStatus.CANCELLED) {
     throw validationError("Cannot record payment on a cancelled invoice");
   }
@@ -407,8 +458,11 @@ export async function recordPayment(
   return result;
 }
 
-export async function getInvoicePdfPayload(id: string) {
-  const invoice = await getInvoiceById(id);
+export async function getInvoicePdfPayload(
+  id: string,
+  scope?: TeamRecordScope,
+) {
+  const invoice = await getInvoiceById(id, scope);
   return {
     type: "invoice" as const,
     invoiceNumber: invoice.invoiceNumber,

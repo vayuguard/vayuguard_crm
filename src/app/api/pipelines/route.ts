@@ -7,8 +7,8 @@ import { writeAuditLog } from "@/server/services/audit.service";
 import { prisma } from "@/server/db/client";
 import { notFound } from "@/server/api/errors";
 import {
-  cuidSchema,
   emptyToNull,
+  entityIdSchema,
 } from "@/lib/validators/common";
 import { getClientIp } from "@/server/api/rate-limit";
 
@@ -30,7 +30,7 @@ const createPipelineSchema = z.object({
 });
 
 const createStageSchema = stageInputSchema.extend({
-  pipelineId: cuidSchema,
+  pipelineId: entityIdSchema,
   action: z.literal("stage").optional(),
 });
 

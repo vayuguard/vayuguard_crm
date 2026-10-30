@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { ok, created, fail } from "@/server/api/response";
 import { getPagination, paginateMeta } from "@/server/api/pagination";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   createTodoList,
@@ -12,9 +13,12 @@ import { getClientIp } from "@/server/api/rate-limit";
 
 export async function GET(request: NextRequest) {
   try {
-    await requirePermission("tasks:read");
+    const session = await requirePermission("tasks:read");
     const pagination = getPagination(request.nextUrl.searchParams);
-    const { items, total } = await listTodoLists(pagination);
+    const { items, total } = await listTodoLists(
+      pagination,
+      (await teamRecordScope(session)),
+    );
     return ok(items, paginateMeta(total, pagination.page, pagination.pageSize));
   } catch (error) {
     return fail(error);

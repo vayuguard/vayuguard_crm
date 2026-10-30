@@ -4,10 +4,17 @@ import { prisma } from "@/server/db/client";
 import { notFound } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
 import {
+  applyMineScope,
+  assertMine,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+import {
   emptyToNull,
   optionalCuid,
   optionalDate,
 } from "@/lib/validators/common";
+
+const TODO_LIST_OWNER_KEYS = ["ownerId"] as const;
 
 export const createTodoListSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -36,15 +43,23 @@ const todoListInclude = {
   _count: { select: { items: true } },
 } satisfies Prisma.TodoListInclude;
 
-export async function listTodoLists(pagination: PaginationInput) {
-  const where: Prisma.TodoListWhereInput = { deletedAt: null };
+export async function listTodoLists(
+  pagination: PaginationInput,
+  scope?: TeamRecordScope,
+) {
+  let where: Prisma.TodoListWhereInput = { deletedAt: null };
   if (pagination.q?.trim()) {
     const term = pagination.q.trim();
-    where.OR = [
-      { name: { contains: term, mode: "insensitive" } },
-      { description: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      {
+        OR: [
+          { name: { contains: term, mode: "insensitive" } },
+          { description: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
+  where = applyMineScope(where, scope, [...TODO_LIST_OWNER_KEYS]);
 
   const [total, items] = await Promise.all([
     prisma.todoList.count({ where }),
@@ -59,12 +74,18 @@ export async function listTodoLists(pagination: PaginationInput) {
   return { items, total };
 }
 
-export async function getTodoListById(id: string) {
+export async function getTodoListById(id: string, scope?: TeamRecordScope) {
   const list = await prisma.todoList.findFirst({
     where: { id, deletedAt: null },
     include: todoListInclude,
   });
   if (!list) throw notFound("Todo list not found");
+  assertMine(
+    list,
+    scope,
+    [...TODO_LIST_OWNER_KEYS],
+    "You can only access your own todo lists",
+  );
   return list;
 }
 
@@ -82,11 +103,21 @@ export async function createTodoList(
   });
 }
 
-export async function updateTodoList(id: string, input: UpdateTodoListInput) {
+export async function updateTodoList(
+  id: string,
+  input: UpdateTodoListInput,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.todoList.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Todo list not found");
+  assertMine(
+    existing,
+    scope,
+    [...TODO_LIST_OWNER_KEYS],
+    "You can only access your own todo lists",
+  );
 
   return prisma.todoList.update({
     where: { id },
@@ -99,11 +130,17 @@ export async function updateTodoList(id: string, input: UpdateTodoListInput) {
   });
 }
 
-export async function deleteTodoList(id: string) {
+export async function deleteTodoList(id: string, scope?: TeamRecordScope) {
   const existing = await prisma.todoList.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Todo list not found");
+  assertMine(
+    existing,
+    scope,
+    [...TODO_LIST_OWNER_KEYS],
+    "You can only access your own todo lists",
+  );
 
   return prisma.todoList.update({
     where: { id },
@@ -111,11 +148,21 @@ export async function deleteTodoList(id: string) {
   });
 }
 
-export async function addTodoItem(listId: string, input: CreateTodoItemInput) {
+export async function addTodoItem(
+  listId: string,
+  input: CreateTodoItemInput,
+  scope?: TeamRecordScope,
+) {
   const list = await prisma.todoList.findFirst({
     where: { id: listId, deletedAt: null },
   });
   if (!list) throw notFound("Todo list not found");
+  assertMine(
+    list,
+    scope,
+    [...TODO_LIST_OWNER_KEYS],
+    "You can only access your own todo lists",
+  );
 
   const maxPos = await prisma.todoItem.aggregate({
     where: { todoListId: listId },
@@ -137,7 +184,9 @@ export async function updateTodoItem(
   listId: string,
   itemId: string,
   input: UpdateTodoItemInput,
+  scope?: TeamRecordScope,
 ) {
+  await getTodoListById(listId, scope);
   const item = await prisma.todoItem.findFirst({
     where: { id: itemId, todoListId: listId },
   });
@@ -154,7 +203,12 @@ export async function updateTodoItem(
   });
 }
 
-export async function deleteTodoItem(listId: string, itemId: string) {
+export async function deleteTodoItem(
+  listId: string,
+  itemId: string,
+  scope?: TeamRecordScope,
+) {
+  await getTodoListById(listId, scope);
   const item = await prisma.todoItem.findFirst({
     where: { id: itemId, todoListId: listId },
   });

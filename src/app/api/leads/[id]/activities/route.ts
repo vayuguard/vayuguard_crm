@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { ok, created, fail } from "@/server/api/response";
 import { getPagination, paginateMeta } from "@/server/api/pagination";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   createLeadActivity,
@@ -14,10 +15,14 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("leads:read");
+    const session = await requirePermission("leads:read");
     const { id } = await params;
     const pagination = getPagination(request.nextUrl.searchParams);
-    const { items, total } = await listLeadActivities(id, pagination);
+    const { items, total } = await listLeadActivities(
+      id,
+      pagination,
+      (await teamRecordScope(session)),
+    );
     return ok(items, paginateMeta(total, pagination.page, pagination.pageSize));
   } catch (error) {
     return fail(error);
@@ -29,7 +34,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = await requirePermission("leads:write");
     const { id } = await params;
     const body = createLeadActivitySchema.parse(await request.json());
-    const activity = await createLeadActivity(id, body, session.user.id);
+    const activity = await createLeadActivity(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "LEAD_ACTIVITY_CREATE",

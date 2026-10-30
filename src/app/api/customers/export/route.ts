@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   CUSTOMER_EXCEL_HEADERS,
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
       return excelDownloadResponse(buffer, "customers-template.xlsx");
     }
 
-    const rows = await exportCustomers(filters, q);
+    const rows = await exportCustomers(filters, q, (await teamRecordScope(session)));
     const buffer = buildExcelBuffer(rows, "Customers");
 
     await writeAuditLog({

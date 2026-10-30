@@ -1,15 +1,16 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { getInvoicePdfPayload } from "@/server/services/invoices.service";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("invoices:read");
+    const session = await requirePermission("invoices:read");
     const { id } = await params;
-    const payload = await getInvoicePdfPayload(id);
+    const payload = await getInvoicePdfPayload(id, (await teamRecordScope(session)));
     const format = request.nextUrl.searchParams.get("format");
 
     if (format === "text") {

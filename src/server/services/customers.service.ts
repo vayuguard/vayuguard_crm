@@ -4,6 +4,12 @@ import { prisma } from "@/server/db/client";
 import { notFound } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
 import {
+  applyMineScope,
+  assertMine,
+  canFilterByUser,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+import {
   emptyToNull,
   optionalCuid,
   optionalEmail,
@@ -11,6 +17,8 @@ import {
 } from "@/lib/validators/common";
 import { nextCustomerNumber } from "@/server/services/leads.service";
 import { pickColumn } from "@/server/lib/excel";
+
+const CUSTOMER_OWNER_KEYS = ["assignedToId", "createdById"] as const;
 
 export const createCustomerSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -67,9 +75,12 @@ const customerInclude = {
 function buildWhere(
   filters: CustomerFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.CustomerWhereInput {
   const where: Prisma.CustomerWhereInput = { deletedAt: null };
-  if (filters.assignedToId) where.assignedToId = filters.assignedToId;
+  if (canFilterByUser(scope, filters.assignedToId)) {
+    where.assignedToId = filters.assignedToId;
+  }
   if (filters.industry) {
     where.industry = { contains: filters.industry, mode: "insensitive" };
   }
@@ -81,23 +92,28 @@ function buildWhere(
   }
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { name: { contains: term, mode: "insensitive" } },
-      { legalName: { contains: term, mode: "insensitive" } },
-      { email: { contains: term, mode: "insensitive" } },
-      { phone: { contains: term, mode: "insensitive" } },
-      { customerNumber: { contains: term, mode: "insensitive" } },
-      { gstNumber: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      {
+        OR: [
+          { name: { contains: term, mode: "insensitive" } },
+          { legalName: { contains: term, mode: "insensitive" } },
+          { email: { contains: term, mode: "insensitive" } },
+          { phone: { contains: term, mode: "insensitive" } },
+          { customerNumber: { contains: term, mode: "insensitive" } },
+          { gstNumber: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...CUSTOMER_OWNER_KEYS]);
 }
 
 export async function listCustomers(
   pagination: PaginationInput,
   filters: CustomerFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.customer.count({ where }),
     prisma.customer.findMany({
@@ -115,7 +131,7 @@ export async function listCustomers(
   return { items, total };
 }
 
-export async function getCustomerById(id: string) {
+export async function getCustomerById(id: string, scope?: TeamRecordScope) {
   const customer = await prisma.customer.findFirst({
     where: { id, deletedAt: null },
     include: {
@@ -181,6 +197,12 @@ export async function getCustomerById(id: string) {
     },
   });
   if (!customer) throw notFound("Customer not found");
+  assertMine(
+    customer,
+    scope,
+    [...CUSTOMER_OWNER_KEYS],
+    "You can only access your own customers",
+  );
   return customer;
 }
 
@@ -206,11 +228,18 @@ export async function updateCustomer(
   id: string,
   input: UpdateCustomerInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.customer.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Customer not found");
+  assertMine(
+    existing,
+    scope,
+    [...CUSTOMER_OWNER_KEYS],
+    "You can only access your own customers",
+  );
 
   const customer = await prisma.customer.update({
     where: { id },
@@ -220,11 +249,21 @@ export async function updateCustomer(
   return customer;
 }
 
-export async function deleteCustomer(id: string, userId: string) {
+export async function deleteCustomer(
+  id: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.customer.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Customer not found");
+  assertMine(
+    existing,
+    scope,
+    [...CUSTOMER_OWNER_KEYS],
+    "You can only access your own customers",
+  );
 
   return prisma.customer.update({
     where: { id },
@@ -266,8 +305,9 @@ export type CustomerExcelRow = Record<
 export async function exportCustomers(
   filters: CustomerFilters = {},
   q?: string,
+  scope?: TeamRecordScope,
 ): Promise<CustomerExcelRow[]> {
-  const where = buildWhere(filters, q);
+  const where = buildWhere(filters, q, scope);
   const customers = await prisma.customer.findMany({
     where,
     orderBy: { createdAt: "desc" },

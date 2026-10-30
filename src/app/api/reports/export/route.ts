@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import * as XLSX from "xlsx";
 import { fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   exportReport,
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
     const raw = searchParamsObject(request.nextUrl.searchParams);
     const query = reportQuerySchema.parse(raw);
     const format = (raw.format ?? "json").toLowerCase();
-    const report = await exportReport(query);
+    const report = await exportReport(query, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "REPORT_EXPORT",

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { emailQuotation } from "@/server/services/quotations.service";
 import { emailQuotationSchema } from "@/lib/validators/quotation";
@@ -13,7 +14,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = await requirePermission("quotes:write");
     const { id } = await params;
     const body = emailQuotationSchema.parse(await request.json());
-    const result = await emailQuotation(id, body, session.user.id);
+    const result = await emailQuotation(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "QUOTATION_EMAIL",

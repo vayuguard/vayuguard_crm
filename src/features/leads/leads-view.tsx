@@ -42,6 +42,9 @@ import { FilterBar } from "@/components/shared/filter-bar";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
+import { OwnerBadge } from "@/components/shared/owner-badge";
+import { leadStatusLabel, priorityLabel } from "@/lib/labels";
+import { canViewAllTeamRecords } from "@/lib/permissions";
 import {
   LeadForm,
   LEAD_PRIORITIES,
@@ -69,6 +72,7 @@ export type Lead = {
   source?: string | null;
   campaignId?: string | null;
   assignedToId?: string | null;
+  assignedTo?: { name?: string | null; email?: string | null } | null;
   notes?: string | null;
   estimatedDealValue?: number | string | null;
   expectedClosingDate?: string | null;
@@ -126,12 +130,13 @@ function tagsToString(lead: Lead): string {
 export function LeadsView() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { can } = usePermissions();
+  const { can, role, permissions, user } = usePermissions();
   const [view, setView] = React.useState<ViewMode>("table");
   const [search, setSearch] = React.useState("");
   const [status, setStatus] = React.useState<string>("all");
   const [priority, setPriority] = React.useState<string>("all");
   const [source, setSource] = React.useState("");
+  const [owner, setOwner] = React.useState<string>("all");
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Lead | null>(null);
   const [deleting, setDeleting] = React.useState<Lead | null>(null);
@@ -143,16 +148,30 @@ export function LeadsView() {
   const [saveViewOpen, setSaveViewOpen] = React.useState(false);
   const [viewName, setViewName] = React.useState("");
   const [pinView, setPinView] = React.useState(true);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ownerParam = params.get("owner");
+    if (ownerParam) setOwner(ownerParam);
+    if (params.get("new") === "1") {
+      setEditing(null);
+      setDialogOpen(true);
+    }
+    if (ownerParam || params.has("new")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const query = useQuery({
-    queryKey: ["leads", search, status, priority, source],
+    queryKey: ["leads", search, status, priority, source, owner],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.set("q", search);
       if (status !== "all") params.set("status", status);
       if (priority !== "all") params.set("priority", priority);
       if (source.trim()) params.set("source", source.trim());
+      if (owner !== "all") params.set("assignedToId", owner);
       const res = await apiFetch<unknown>(`/api/leads?${params}`);
       return unwrapList<Lead>(res.data);
     },
@@ -175,6 +194,33 @@ export function LeadsView() {
     enabled: can("employees:read"),
     retry: false,
   });
+
+  const seeAll = canViewAllTeamRecords(role, permissions);
+  const teamQuery = useQuery({
+    queryKey: ["my-team"],
+    queryFn: async () => {
+      const res = await apiFetch<unknown>("/api/my-team");
+      return unwrapList<{ id: string; name?: string | null; email?: string | null }>(
+        res.data,
+      );
+    },
+    enabled: !seeAll,
+  });
+
+  const ownerOptions = seeAll
+    ? (employeesQuery.data ?? []).map((e) => ({
+        id: e.id,
+        label: e.name || e.email || e.id,
+      }))
+    : (teamQuery.data ?? []).length > 0 && user?.id
+      ? [
+          { id: user.id, label: "Only mine" },
+          ...(teamQuery.data ?? []).map((m) => ({
+            id: m.id,
+            label: m.name || m.email || m.id,
+          })),
+        ]
+      : [];
 
   const campaignsQuery = useQuery({
     queryKey: ["campaigns", "options"],
@@ -369,13 +415,20 @@ export function LeadsView() {
     },
     {
       id: "status",
-      header: "Status",
-      cell: (row) => <Badge variant="secondary">{row.status}</Badge>,
+      header: "Stage",
+      cell: (row) => (
+        <Badge variant="secondary">{leadStatusLabel(row.status)}</Badge>
+      ),
+    },
+    {
+      id: "owner",
+      header: "Handled by",
+      cell: (row) => <OwnerBadge person={row.assignedTo} compact />,
     },
     {
       id: "priority",
       header: "Priority",
-      cell: (row) => row.priority ?? "—",
+      cell: (row) => priorityLabel(row.priority),
     },
     {
       id: "value",
@@ -528,21 +581,32 @@ export function LeadsView() {
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-xs"
         />
-        <Select value={status} onValueChange={(v) => setStatus(v ?? "all")}>
+        <Select
+          value={status}
+          items={[
+            { value: "all", label: "All stages" },
+            ...LEAD_STATUSES.map((s) => ({ value: s, label: leadStatusLabel(s) })),
+          ]}
+          onValueChange={(v) => setStatus(v ?? "all")}
+        >
           <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Status" />
+            <SelectValue placeholder="Stage" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="all">All stages</SelectItem>
             {LEAD_STATUSES.map((s) => (
               <SelectItem key={s} value={s}>
-                {s}
+                {leadStatusLabel(s)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select
           value={priority}
+          items={[
+            { value: "all", label: "All priorities" },
+            ...LEAD_PRIORITIES.map((p) => ({ value: p, label: priorityLabel(p) })),
+          ]}
           onValueChange={(v) => setPriority(v ?? "all")}
         >
           <SelectTrigger className="w-[140px]">
@@ -552,11 +616,33 @@ export function LeadsView() {
             <SelectItem value="all">All priorities</SelectItem>
             {LEAD_PRIORITIES.map((p) => (
               <SelectItem key={p} value={p}>
-                {p}
+                {priorityLabel(p)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        {ownerOptions.length > 0 ? (
+          <Select
+            value={owner}
+            items={[
+              { value: "all", label: "Everyone I can see" },
+              ...ownerOptions.map((o) => ({ value: o.id, label: o.label })),
+            ]}
+            onValueChange={(v) => setOwner(v ?? "all")}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Handled by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Everyone I can see</SelectItem>
+              {ownerOptions.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
         <Input
           placeholder="Source"
           value={source}
@@ -892,7 +978,7 @@ function LeadsKanban({
           >
             <div className="flex items-center justify-between border-b border-border px-3 py-2">
               <span className="text-xs font-semibold tracking-wide uppercase">
-                {status}
+                {leadStatusLabel(status)}
               </span>
               <Badge variant="outline">{column.length}</Badge>
             </div>
@@ -922,6 +1008,11 @@ function LeadsKanban({
                     <p className="mt-1 text-xs font-medium text-primary">
                       {formatCurrency(lead.estimatedDealValue)}
                     </p>
+                    <OwnerBadge
+                      person={lead.assignedTo}
+                      compact
+                      className="mt-1.5"
+                    />
                   </button>
                   <button
                     type="button"

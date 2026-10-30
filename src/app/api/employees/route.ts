@@ -12,6 +12,8 @@ import {
   recordAttendance,
   createCommission,
   createSalesTarget,
+  setEmployeeManager,
+  setManagerSchema,
   upsertEmployeeProfile,
   upsertEmployeeProfileSchema,
 } from "@/server/services/employees.service";
@@ -35,6 +37,10 @@ const createEmployeeActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("commission"),
     data: createCommissionSchema,
+  }),
+  z.object({
+    action: z.literal("manager"),
+    data: setManagerSchema,
   }),
 ]);
 
@@ -71,6 +77,9 @@ export async function POST(request: NextRequest) {
         break;
       case "commission":
         result = await createCommission(body.data);
+        break;
+      case "manager":
+        result = await setEmployeeManager(body.data);
         break;
     }
 

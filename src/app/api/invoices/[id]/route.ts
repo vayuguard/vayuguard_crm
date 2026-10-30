@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteInvoice,
@@ -14,9 +15,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("invoices:read");
+    const session = await requirePermission("invoices:read");
     const { id } = await params;
-    return ok(await getInvoiceById(id));
+    return ok(await getInvoiceById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -27,7 +28,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const session = await requirePermission("invoices:write");
     const { id } = await params;
     const body = updateInvoiceSchema.parse(await request.json());
-    const invoice = await updateInvoice(id, body, session.user.id);
+    const invoice = await updateInvoice(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "INVOICE_UPDATE",
@@ -49,7 +55,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("invoices:write");
     const { id } = await params;
-    const invoice = await deleteInvoice(id, session.user.id);
+    const invoice = await deleteInvoice(
+      id,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "INVOICE_DELETE",

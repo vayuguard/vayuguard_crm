@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { convertLeadToCustomer } from "@/server/services/leads.service";
 import { convertLeadSchema } from "@/lib/validators/lead";
@@ -17,7 +18,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     const { id } = await params;
     const json = await request.json().catch(() => ({}));
     const options = convertLeadSchema.parse(json);
-    const result = await convertLeadToCustomer(id, session.user.id, options);
+    const result = await convertLeadToCustomer(
+      id,
+      session.user.id,
+      options,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "LEAD_CONVERT",

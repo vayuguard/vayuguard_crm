@@ -32,6 +32,7 @@ import {
 } from "@/components/shared/data-table";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
+import { OwnerBadge } from "@/components/shared/owner-badge";
 
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const;
 
@@ -212,8 +213,8 @@ export function SupportView() {
     { id: "priority", header: "Priority", cell: (r) => r.priority ?? "—" },
     {
       id: "assignee",
-      header: "Assignee",
-      cell: (r) => r.assignedTo?.name ?? "—",
+      header: "Handled by",
+      cell: (r) => <OwnerBadge person={r.assignedTo} compact />,
     },
     { id: "created", header: "Created", cell: (r) => formatDate(r.createdAt) },
   ];

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { Trash2, Trophy } from "lucide-react";
+import { Trash2, Trophy, Users } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, unwrapList } from "@/lib/api-client";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -19,6 +19,15 @@ import {
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+type PersonLite = { id: string; name?: string | null; email?: string | null };
 
 type Employee = {
   id: string;
@@ -32,11 +41,15 @@ type Employee = {
     employeeCode?: string | null;
     phone?: string | null;
     joiningDate?: string | null;
+    managerId?: string | null;
   } | null;
+  manager?: PersonLite | null;
+  reportCount?: number;
   isActive?: boolean;
 };
 
 type EmployeeDetail = Employee & {
+  reports?: PersonLite[];
   salesTargets?: {
     id: string;
     period: string;
@@ -110,6 +123,30 @@ export function EmployeesView() {
     },
   });
 
+  const canEditEmployees = can("employees:write");
+
+  const peopleQuery = useQuery({
+    queryKey: ["assignees"],
+    enabled: canEditEmployees && !!selectedId,
+    queryFn: async () => {
+      const res = await apiFetch<unknown>("/api/assignees");
+      return unwrapList<PersonLite>(res.data);
+    },
+  });
+
+  const managerMutation = useMutation({
+    mutationFn: ({ userId, managerId }: { userId: string; managerId: string | null }) =>
+      apiFetch("/api/employees", {
+        method: "POST",
+        body: JSON.stringify({ action: "manager", data: { userId, managerId } }),
+      }),
+    onSuccess: () => {
+      toast.success("Reporting manager updated");
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) =>
       apiFetch(`/api/users/${id}`, { method: "DELETE" }),
@@ -148,6 +185,29 @@ export function EmployeesView() {
       id: "designation",
       header: "Designation",
       cell: (r) => r.employeeProfile?.designation ?? "—",
+    },
+    {
+      id: "manager",
+      header: "Reports to",
+      cell: (r) =>
+        r.manager ? (
+          r.manager.name ?? r.manager.email
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "team",
+      header: "Team",
+      cell: (r) =>
+        r.reportCount ? (
+          <Badge variant="secondary">
+            <Users className="size-3" />
+            {r.reportCount}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
     },
     {
       id: "status",
@@ -309,6 +369,68 @@ export function EmployeesView() {
                   value={formatDate(detail.employeeProfile?.joiningDate)}
                 />
               </dl>
+
+              <Section title="Reporting">
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted-foreground">
+                    Reports to — this manager can see {detail.name}&apos;s
+                    leads, deals, tasks and calendar.
+                  </p>
+                  {canEditEmployees ? (
+                    <Select
+                      value={detail.manager?.id ?? "__none__"}
+                      items={[
+                        { value: "__none__", label: "No manager" },
+                        ...(peopleQuery.data ?? []).map((p) => ({
+                          value: p.id,
+                          label: p.name ?? p.email ?? p.id,
+                        })),
+                      ]}
+                      disabled={managerMutation.isPending}
+                      onValueChange={(v) =>
+                        managerMutation.mutate({
+                          userId: detail.id,
+                          managerId: !v || v === "__none__" ? null : v,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="No manager" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No manager</SelectItem>
+                        {(peopleQuery.data ?? [])
+                          .filter((p) => p.id !== detail.id)
+                          .map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.name ?? p.email}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm">
+                      {detail.manager?.name ?? detail.manager?.email ?? "No manager"}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Their team</p>
+                  {(detail.reports ?? []).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Nobody reports to {detail.name} yet.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {detail.reports?.map((p) => (
+                        <Badge key={p.id} variant="outline">
+                          {p.name ?? p.email}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Section>
 
               <Section title="Sales targets">
                 {(detail.salesTargets ?? []).length === 0 ? (

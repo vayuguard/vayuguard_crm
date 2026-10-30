@@ -4,10 +4,18 @@ import { prisma } from "@/server/db/client";
 import { notFound } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
 import {
+  applyMineScope,
+  assertMine,
+  canFilterByUser,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+import {
   emptyToNull,
   optionalCuid,
   optionalDate,
 } from "@/lib/validators/common";
+
+const TASK_OWNER_KEYS = ["assignedToId", "createdById"] as const;
 
 export const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -106,12 +114,12 @@ async function recordAssignmentEvent(
 function buildWhere(
   filters: TaskFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.TaskWhereInput {
   const where: Prisma.TaskWhereInput = { deletedAt: null };
   if (filters.status) where.status = filters.status;
   if (filters.type) where.type = filters.type;
   if (filters.priority) where.priority = filters.priority;
-  if (filters.assignedToId) where.assignedToId = filters.assignedToId;
   if (filters.leadId) where.leadId = filters.leadId;
   if (filters.customerId) where.customerId = filters.customerId;
   if (filters.dueFrom || filters.dueTo) {
@@ -119,21 +127,33 @@ function buildWhere(
     if (filters.dueFrom) where.dueAt.gte = filters.dueFrom;
     if (filters.dueTo) where.dueAt.lte = filters.dueTo;
   }
+
+  if (canFilterByUser(scope, filters.assignedToId)) {
+    where.assignedToId = filters.assignedToId;
+  }
+
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { title: { contains: term, mode: "insensitive" } },
-      { description: { contains: term, mode: "insensitive" } },
+    const searchOr = [
+      { title: { contains: term, mode: "insensitive" as const } },
+      { description: { contains: term, mode: "insensitive" as const } },
+    ];
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      { OR: searchOr },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...TASK_OWNER_KEYS]);
 }
+
+export type TaskListScope = TeamRecordScope;
 
 export async function listTasks(
   pagination: PaginationInput,
   filters: TaskFilters = {},
+  scope?: TaskListScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.task.count({ where }),
     prisma.task.findMany({
@@ -154,12 +174,13 @@ export async function listTasks(
   return { items, total };
 }
 
-export async function getTaskById(id: string) {
+export async function getTaskById(id: string, scope?: TaskListScope) {
   const task = await prisma.task.findFirst({
     where: { id, deletedAt: null },
     include: taskInclude,
   });
   if (!task) throw notFound("Task not found");
+  assertMine(task, scope, [...TASK_OWNER_KEYS], "You can only access your own tasks");
   return task;
 }
 
@@ -218,12 +239,14 @@ export async function updateTask(
   id: string,
   input: UpdateTaskInput,
   userId: string,
+  scope?: TaskListScope,
 ) {
   const existing = await prisma.task.findFirst({
     where: { id, deletedAt: null },
     include: { recurrence: true },
   });
   if (!existing) throw notFound("Task not found");
+  assertMine(existing, scope, [...TASK_OWNER_KEYS], "You can only access your own tasks");
 
   const { recurrence, reminderAt, assignmentNote, ...data } = input;
 
@@ -307,12 +330,16 @@ export async function updateTask(
   });
 }
 
-export async function listTaskAssignmentHistory(taskId: string) {
+export async function listTaskAssignmentHistory(
+  taskId: string,
+  scope?: TaskListScope,
+) {
   const task = await prisma.task.findFirst({
     where: { id: taskId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, assignedToId: true, createdById: true },
   });
   if (!task) throw notFound("Task not found");
+  assertMine(task, scope, [...TASK_OWNER_KEYS], "You can only access your own tasks");
 
   return prisma.taskAssignmentEvent.findMany({
     where: { taskId },
@@ -325,11 +352,16 @@ export async function listTaskAssignmentHistory(taskId: string) {
   });
 }
 
-export async function deleteTask(id: string, userId: string) {
+export async function deleteTask(
+  id: string,
+  userId: string,
+  scope?: TaskListScope,
+) {
   const existing = await prisma.task.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Task not found");
+  assertMine(existing, scope, [...TASK_OWNER_KEYS], "You can only access your own tasks");
 
   return prisma.task.update({
     where: { id },

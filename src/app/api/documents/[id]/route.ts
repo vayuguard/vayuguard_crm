@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteDocument,
@@ -14,9 +15,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("documents:read");
+    const session = await requirePermission("documents:read");
     const { id } = await params;
-    return ok(await getDocumentById(id));
+    return ok(await getDocumentById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -27,7 +28,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const session = await requirePermission("documents:write");
     const { id } = await params;
     const body = updateDocumentSchema.parse(await request.json());
-    const document = await updateDocument(id, body, session.user.id);
+    const document = await updateDocument(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "DOCUMENT_UPDATE",
@@ -49,7 +55,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("documents:write");
     const { id } = await params;
-    const document = await deleteDocument(id);
+    const document = await deleteDocument(id, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "DOCUMENT_DELETE",

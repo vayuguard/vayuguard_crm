@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { bulkUpdateLeads } from "@/server/services/leads.service";
 import { bulkUpdateLeadsSchema } from "@/lib/validators/lead";
@@ -10,7 +11,11 @@ export async function PATCH(request: NextRequest) {
   try {
     const session = await requirePermission("leads:write");
     const body = bulkUpdateLeadsSchema.parse(await request.json());
-    const result = await bulkUpdateLeads(body, session.user.id);
+    const result = await bulkUpdateLeads(
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "LEAD_BULK_UPDATE",

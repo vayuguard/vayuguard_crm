@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { moveDeal, moveDealSchema } from "@/server/services/deals.service";
 import { getClientIp } from "@/server/api/rate-limit";
@@ -12,7 +13,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = await requirePermission("deals:write");
     const { id } = await params;
     const body = moveDealSchema.parse(await request.json());
-    const deal = await moveDeal(id, body, session.user.id);
+    const deal = await moveDeal(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "DEAL_MOVE",

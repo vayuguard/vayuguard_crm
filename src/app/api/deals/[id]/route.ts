@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteDeal,
@@ -14,9 +15,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("deals:read");
+    const session = await requirePermission("deals:read");
     const { id } = await params;
-    return ok(await getDealById(id));
+    return ok(await getDealById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -27,7 +28,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const session = await requirePermission("deals:write");
     const { id } = await params;
     const body = updateDealSchema.parse(await request.json());
-    const deal = await updateDeal(id, body, session.user.id);
+    const deal = await updateDeal(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "DEAL_UPDATE",
@@ -49,7 +55,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("deals:delete");
     const { id } = await params;
-    const deal = await deleteDeal(id, session.user.id);
+    const deal = await deleteDeal(id, session.user.id, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "DEAL_DELETE",

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { validationError } from "@/server/api/errors";
+import {
+  applyMineScope,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
 
 export const reportQuerySchema = z.object({
   type: z.enum([
@@ -28,13 +32,20 @@ function dateRange(from?: Date, to?: Date) {
   };
 }
 
-export async function runReport(query: ReportQuery) {
+export async function runReport(
+  query: ReportQuery,
+  scope?: TeamRecordScope,
+) {
   const createdAt = dateRange(query.from, query.to);
 
   switch (query.type) {
     case "sales": {
       const deals = await prisma.deal.findMany({
-        where: { deletedAt: null, createdAt },
+        where: applyMineScope(
+          { deletedAt: null, createdAt },
+          scope,
+          ["assignedToId", "createdById"],
+        ),
         select: {
           id: true,
           title: true,
@@ -72,7 +83,11 @@ export async function runReport(query: ReportQuery) {
 
     case "revenue": {
       const invoices = await prisma.invoice.findMany({
-        where: { deletedAt: null, issueDate: createdAt },
+        where: applyMineScope(
+          { deletedAt: null, issueDate: createdAt },
+          scope,
+          ["createdById"],
+        ),
         select: {
           id: true,
           invoiceNumber: true,
@@ -106,7 +121,11 @@ export async function runReport(query: ReportQuery) {
     case "conversion": {
       const leads = await prisma.lead.groupBy({
         by: ["status"],
-        where: { deletedAt: null, createdAt },
+        where: applyMineScope(
+          { deletedAt: null, createdAt },
+          scope,
+          ["assignedToId", "createdById"],
+        ),
         _count: { _all: true },
       });
       const total = leads.reduce((s, l) => s + l._count._all, 0);
@@ -127,8 +146,12 @@ export async function runReport(query: ReportQuery) {
     }
 
     case "performance": {
+      // SalesTarget is keyed by userId — employees see their own (managers: their team).
+      const userFilter =
+        scope && !scope.seeAll ? { userId: { in: scope.teamUserIds } } : {};
       const targets = await prisma.salesTarget.findMany({
         where: {
+          ...userFilter,
           ...(query.from || query.to
             ? {
                 year: {
@@ -171,7 +194,11 @@ export async function runReport(query: ReportQuery) {
     case "sources": {
       const sources = await prisma.lead.groupBy({
         by: ["source"],
-        where: { deletedAt: null, createdAt },
+        where: applyMineScope(
+          { deletedAt: null, createdAt },
+          scope,
+          ["assignedToId", "createdById"],
+        ),
         _count: { _all: true },
         _sum: { estimatedDealValue: true },
       });
@@ -191,7 +218,11 @@ export async function runReport(query: ReportQuery) {
 
     case "roi": {
       const campaigns = await prisma.campaign.findMany({
-        where: { deletedAt: null, createdAt },
+        where: applyMineScope(
+          { deletedAt: null, createdAt },
+          scope,
+          ["createdById"],
+        ),
         include: { metrics: true },
         take: 1000,
       });
@@ -220,14 +251,19 @@ export async function runReport(query: ReportQuery) {
     }
 
     case "tickets": {
+      const ticketWhere = applyMineScope(
+        { deletedAt: null, createdAt },
+        scope,
+        ["assignedToId", "createdById"],
+      );
       const byStatus = await prisma.supportTicket.groupBy({
         by: ["status"],
-        where: { deletedAt: null, createdAt },
+        where: ticketWhere,
         _count: { _all: true },
       });
       const byPriority = await prisma.supportTicket.groupBy({
         by: ["priority"],
-        where: { deletedAt: null, createdAt },
+        where: ticketWhere,
         _count: { _all: true },
       });
       return {
@@ -251,7 +287,11 @@ export async function runReport(query: ReportQuery) {
     case "invoices": {
       const byPayment = await prisma.invoice.groupBy({
         by: ["paymentStatus"],
-        where: { deletedAt: null, issueDate: createdAt },
+        where: applyMineScope(
+          { deletedAt: null, issueDate: createdAt },
+          scope,
+          ["createdById"],
+        ),
         _count: { _all: true },
         _sum: { total: true, amountPaid: true },
       });
@@ -276,7 +316,11 @@ export async function runReport(query: ReportQuery) {
 
     case "payments": {
       const payments = await prisma.payment.findMany({
-        where: { paidAt: createdAt },
+        where: applyMineScope(
+          { paidAt: createdAt },
+          scope,
+          ["createdById"],
+        ),
         include: {
           customer: { select: { id: true, name: true } },
           invoice: { select: { id: true, invoiceNumber: true } },
@@ -307,8 +351,11 @@ export async function runReport(query: ReportQuery) {
   }
 }
 
-export async function exportReport(query: ReportQuery) {
-  const report = await runReport(query);
+export async function exportReport(
+  query: ReportQuery,
+  scope?: TeamRecordScope,
+) {
+  const report = await runReport(query, scope);
   return {
     exportedAt: new Date().toISOString(),
     ...report,

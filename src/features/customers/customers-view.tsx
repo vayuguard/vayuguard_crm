@@ -23,6 +23,7 @@ import {
 } from "@/components/shared/data-table";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
+import { OwnerBadge } from "@/components/shared/owner-badge";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { BulkExcelActions } from "@/components/shared/bulk-excel-actions";
 import {
@@ -55,6 +56,7 @@ type Customer = {
   shippingPinCode?: string | null;
   notes?: string | null;
   assignedToId?: string | null;
+  assignedTo?: { name?: string | null; email?: string | null } | null;
 };
 
 export function CustomersView() {
@@ -155,6 +157,11 @@ export function CustomersView() {
       header: "Status",
       cell: (r) =>
         r.status ? <Badge variant="secondary">{r.status}</Badge> : "—",
+    },
+    {
+      id: "owner",
+      header: "Handled by",
+      cell: (r) => <OwnerBadge person={r.assignedTo} compact />,
     },
     {
       id: "created",

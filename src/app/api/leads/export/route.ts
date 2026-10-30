@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import Papa from "papaparse";
 import { fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { exportLeads } from "@/server/services/leads.service";
 import { leadFiltersSchema } from "@/lib/validators/lead";
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const filters = leadFiltersSchema.parse(searchParamsObject(searchParams));
     const q = searchParams.get("q") ?? undefined;
-    const rows = await exportLeads(filters, q);
+    const rows = await exportLeads(filters, q, (await teamRecordScope(session)));
     const csv = Papa.unparse(rows);
 
     await writeAuditLog({

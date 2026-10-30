@@ -394,6 +394,14 @@ export function ContactsView() {
     setDialogOpen(true);
   }
 
+  React.useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "1") {
+      setEditing(null);
+      setDialogOpen(true);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
+
   /** Saves the scanned card straight into a new contact row. */
   function handleScanConfirm(card: ScannedContact) {
     setEditing(null);
@@ -523,12 +531,13 @@ export function ContactsView() {
         <div className="flex justify-end gap-1">
           {can("contacts:write") && can("leads:write") ? (
             <Button
-              variant="ghost"
-              size="icon-sm"
-              title="Convert to lead"
+              variant="outline"
+              size="sm"
+              title="Create a lead from this contact"
               onClick={() => setToLead(r)}
             >
               <UserPlus className="size-3.5" />
+              Make lead
             </Button>
           ) : null}
           {can("contacts:write") &&
@@ -536,15 +545,16 @@ export function ContactsView() {
           !r.customerId &&
           !r.customer?.id ? (
             <Button
-              variant="ghost"
-              size="icon-sm"
-              title="Convert to customer"
+              variant="outline"
+              size="sm"
+              title="Create a customer from this contact"
               onClick={() => {
                 setCompanyName("");
                 setToCustomer(r);
               }}
             >
               <Building2 className="size-3.5" />
+              Make customer
             </Button>
           ) : null}
           {can("contacts:write") ? (

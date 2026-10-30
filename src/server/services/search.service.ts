@@ -1,5 +1,15 @@
-import { z } from "zod";
+﻿import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import {
+  applyMineScope,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+
+/** Keep Prisma QueryMode narrow — object literals lose the literal through generics. */
+function contains(term: string): Prisma.StringFilter {
+  return { contains: term, mode: "insensitive" };
+}
 
 export const searchQuerySchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -34,7 +44,10 @@ const ALL_MODULES = [
   "employees",
 ] as const;
 
-export async function globalSearch(input: SearchQuery) {
+export async function globalSearch(
+  input: SearchQuery,
+  scope?: TeamRecordScope,
+) {
   const term = input.q.trim();
   const limit = input.limit ?? 8;
   const modules = new Set(
@@ -57,16 +70,20 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.lead
         .findMany({
-          where: {
-            deletedAt: null,
-            OR: [
-              { name: { contains: term, mode: "insensitive" } },
-              { company: { contains: term, mode: "insensitive" } },
-              { email: { contains: term, mode: "insensitive" } },
-              { leadNumber: { contains: term, mode: "insensitive" } },
-              { phone: { contains: term, mode: "insensitive" } },
-            ],
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              OR: [
+                { name: contains(term) },
+                { company: contains(term) },
+                { email: contains(term) },
+                { leadNumber: contains(term) },
+                { phone: contains(term) },
+              ],
+            },
+            scope,
+            ["assignedToId", "createdById"],
+          ),
           select: {
             id: true,
             name: true,
@@ -94,16 +111,20 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.customer
         .findMany({
-          where: {
-            deletedAt: null,
-            OR: [
-              { name: { contains: term, mode: "insensitive" } },
-              { email: { contains: term, mode: "insensitive" } },
-              { customerNumber: { contains: term, mode: "insensitive" } },
-              { phone: { contains: term, mode: "insensitive" } },
-              { gstNumber: { contains: term, mode: "insensitive" } },
-            ],
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              OR: [
+                { name: contains(term) },
+                { email: contains(term) },
+                { customerNumber: contains(term) },
+                { phone: contains(term) },
+                { gstNumber: contains(term) },
+              ],
+            },
+            scope,
+            ["assignedToId", "createdById"],
+          ),
           select: {
             id: true,
             name: true,
@@ -130,14 +151,18 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.contact
         .findMany({
-          where: {
-            deletedAt: null,
-            OR: [
-              { name: { contains: term, mode: "insensitive" } },
-              { email: { contains: term, mode: "insensitive" } },
-              { phone: { contains: term, mode: "insensitive" } },
-            ],
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              OR: [
+                { name: contains(term) },
+                { email: contains(term) },
+                { phone: contains(term) },
+              ],
+            },
+            scope,
+            ["createdById"],
+          ),
           select: { id: true, name: true, email: true, designation: true },
           take: limit,
         })
@@ -159,10 +184,14 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.deal
         .findMany({
-          where: {
-            deletedAt: null,
-            title: { contains: term, mode: "insensitive" },
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              title: contains(term),
+            },
+            scope,
+            ["assignedToId", "createdById"],
+          ),
           select: {
             id: true,
             title: true,
@@ -189,13 +218,17 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.task
         .findMany({
-          where: {
-            deletedAt: null,
-            OR: [
-              { title: { contains: term, mode: "insensitive" } },
-              { description: { contains: term, mode: "insensitive" } },
-            ],
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              OR: [
+                { title: contains(term) },
+                { description: contains(term) },
+              ],
+            },
+            scope,
+            ["assignedToId", "createdById"],
+          ),
           select: {
             id: true,
             title: true,
@@ -226,8 +259,8 @@ export async function globalSearch(input: SearchQuery) {
           where: {
             deletedAt: null,
             OR: [
-              { name: { contains: term, mode: "insensitive" } },
-              { sku: { contains: term, mode: "insensitive" } },
+              { name: contains(term) },
+              { sku: contains(term) },
             ],
           },
           select: { id: true, name: true, sku: true, price: true },
@@ -251,13 +284,17 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.quotation
         .findMany({
-          where: {
-            deletedAt: null,
-            OR: [
-              { quoteNumber: { contains: term, mode: "insensitive" } },
-              { notes: { contains: term, mode: "insensitive" } },
-            ],
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              OR: [
+                { quoteNumber: contains(term) },
+                { notes: contains(term) },
+              ],
+            },
+            scope,
+            ["createdById"],
+          ),
           select: {
             id: true,
             quoteNumber: true,
@@ -285,13 +322,17 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.invoice
         .findMany({
-          where: {
-            deletedAt: null,
-            OR: [
-              { invoiceNumber: { contains: term, mode: "insensitive" } },
-              { notes: { contains: term, mode: "insensitive" } },
-            ],
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              OR: [
+                { invoiceNumber: contains(term) },
+                { notes: contains(term) },
+              ],
+            },
+            scope,
+            ["createdById"],
+          ),
           select: {
             id: true,
             invoiceNumber: true,
@@ -319,13 +360,17 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.supportTicket
         .findMany({
-          where: {
-            deletedAt: null,
-            OR: [
-              { ticketNumber: { contains: term, mode: "insensitive" } },
-              { subject: { contains: term, mode: "insensitive" } },
-            ],
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              OR: [
+                { ticketNumber: contains(term) },
+                { subject: contains(term) },
+              ],
+            },
+            scope,
+            ["assignedToId", "createdById"],
+          ),
           select: {
             id: true,
             ticketNumber: true,
@@ -352,10 +397,14 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.campaign
         .findMany({
-          where: {
-            deletedAt: null,
-            name: { contains: term, mode: "insensitive" },
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              name: contains(term),
+            },
+            scope,
+            ["createdById"],
+          ),
           select: { id: true, name: true, channel: true, status: true },
           take: limit,
         })
@@ -377,10 +426,14 @@ export async function globalSearch(input: SearchQuery) {
     tasks.push(
       prisma.document
         .findMany({
-          where: {
-            deletedAt: null,
-            name: { contains: term, mode: "insensitive" },
-          },
+          where: applyMineScope(
+            {
+              deletedAt: null,
+              name: contains(term),
+            },
+            scope,
+            ["uploadedById"],
+          ),
           select: { id: true, name: true, category: true },
           take: limit,
         })
@@ -405,11 +458,11 @@ export async function globalSearch(input: SearchQuery) {
           where: {
             deletedAt: null,
             OR: [
-              { name: { contains: term, mode: "insensitive" } },
-              { email: { contains: term, mode: "insensitive" } },
+              { name: contains(term) },
+              { email: contains(term) },
               {
                 employeeProfile: {
-                  employeeCode: { contains: term, mode: "insensitive" },
+                  employeeCode: contains(term),
                 },
               },
             ],

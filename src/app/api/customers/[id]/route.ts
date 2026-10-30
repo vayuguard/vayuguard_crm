@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteCustomer,
@@ -14,9 +15,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("customers:read");
+    const session = await requirePermission("customers:read");
     const { id } = await params;
-    return ok(await getCustomerById(id));
+    return ok(await getCustomerById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -27,7 +28,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const session = await requirePermission("customers:write");
     const { id } = await params;
     const body = updateCustomerSchema.parse(await request.json());
-    const customer = await updateCustomer(id, body, session.user.id);
+    const customer = await updateCustomer(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "CUSTOMER_UPDATE",
@@ -49,7 +55,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("customers:delete");
     const { id } = await params;
-    const customer = await deleteCustomer(id, session.user.id);
+    const customer = await deleteCustomer(
+      id,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "CUSTOMER_DELETE",

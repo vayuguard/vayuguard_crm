@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { convertContactToLead } from "@/server/services/contacts.service";
 import { getClientIp } from "@/server/api/rate-limit";
@@ -11,7 +12,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission(["contacts:write", "leads:write"]);
     const { id } = await params;
-    const result = await convertContactToLead(id, session.user.id);
+    const result = await convertContactToLead(
+      id,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "CONTACT_TO_LEAD",

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, created, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   addTodoItem,
@@ -19,9 +20,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("tasks:read");
+    const session = await requirePermission("tasks:read");
     const { id } = await params;
-    return ok(await getTodoListById(id));
+    return ok(await getTodoListById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -31,6 +32,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("tasks:write");
     const { id } = await params;
+    const scope = (await teamRecordScope(session));
     const body = (await request.json()) as Record<string, unknown>;
 
     // Nested item update: { itemId, ...fields } or { item: { id, ... } }
@@ -39,7 +41,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       const { itemId: _itemId, delete: shouldDelete, ...rest } = body;
       void _itemId;
       if (shouldDelete === true) {
-        const deleted = await deleteTodoItem(id, itemId);
+        const deleted = await deleteTodoItem(id, itemId, scope);
         await writeAuditLog({
           action: "TODO_ITEM_DELETE",
           entityType: "TodoItem",
@@ -51,12 +53,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return ok(deleted);
       }
       const parsed = updateTodoItemSchema.parse(rest);
-      const item = await updateTodoItem(id, itemId, parsed);
+      const item = await updateTodoItem(id, itemId, parsed, scope);
       return ok(item);
     }
 
     const parsed = updateTodoListSchema.parse(body);
-    const list = await updateTodoList(id, parsed);
+    const list = await updateTodoList(id, parsed, scope);
 
     await writeAuditLog({
       action: "TODO_LIST_UPDATE",
@@ -79,7 +81,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = await requirePermission("tasks:write");
     const { id } = await params;
     const body = createTodoItemSchema.parse(await request.json());
-    const item = await addTodoItem(id, body);
+    const item = await addTodoItem(id, body, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "TODO_ITEM_CREATE",
@@ -101,7 +103,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("tasks:delete");
     const { id } = await params;
-    const list = await deleteTodoList(id);
+    const list = await deleteTodoList(id, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "TODO_LIST_DELETE",

@@ -2,9 +2,25 @@ import { z } from "zod";
 
 export const cuidSchema = z.string().cuid();
 
+/**
+ * Accepts Prisma cuid() values and fixed seed ids (e.g. "default-pipeline").
+ * Use for FKs that may come from seeded system rows, not only user-created cuids.
+ */
+export const entityIdSchema = z
+  .string()
+  .trim()
+  .min(1, "Required")
+  .max(64)
+  .regex(/^[a-zA-Z0-9_-]+$/, "Invalid id");
+
 export const optionalCuid = z.preprocess(
   (v) => (v === "" ? null : v),
   z.string().cuid().nullable().optional(),
+);
+
+export const optionalEntityId = z.preprocess(
+  (v) => (v === "" ? null : v),
+  entityIdSchema.nullable().optional(),
 );
 
 export const emptyToNull = z

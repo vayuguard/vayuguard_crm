@@ -2,12 +2,19 @@ import { type Prisma, CampaignStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { notFound } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
+import {
+  applyMineScope,
+  assertMine,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
 import type {
   CampaignFilters,
   CreateCampaignInput,
   UpdateCampaignInput,
   UpdateCampaignMetricsInput,
 } from "@/lib/validators/campaign";
+
+const CAMPAIGN_OWNER_KEYS = ["createdById"] as const;
 
 const campaignInclude = {
   createdBy: { select: { id: true, name: true, email: true } },
@@ -35,6 +42,7 @@ function withRoi<
 function buildWhere(
   filters: CampaignFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.CampaignWhereInput {
   const where: Prisma.CampaignWhereInput = { deletedAt: null };
   if (filters.status) where.status = filters.status;
@@ -46,19 +54,25 @@ function buildWhere(
   }
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { name: { contains: term, mode: "insensitive" } },
-      { subject: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { name: { contains: term, mode: "insensitive" } },
+          { subject: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...CAMPAIGN_OWNER_KEYS]);
 }
 
 export async function listCampaigns(
   pagination: PaginationInput,
   filters: CampaignFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.campaign.count({ where }),
     prisma.campaign.findMany({
@@ -72,7 +86,7 @@ export async function listCampaigns(
   return { items: items.map(withRoi), total };
 }
 
-export async function getCampaignById(id: string) {
+export async function getCampaignById(id: string, scope?: TeamRecordScope) {
   const campaign = await prisma.campaign.findFirst({
     where: { id, deletedAt: null },
     include: {
@@ -86,6 +100,12 @@ export async function getCampaignById(id: string) {
     },
   });
   if (!campaign) throw notFound("Campaign not found");
+  assertMine(
+    campaign,
+    scope,
+    [...CAMPAIGN_OWNER_KEYS],
+    "You can only access your own campaigns",
+  );
   return withRoi(campaign);
 }
 
@@ -115,12 +135,19 @@ export async function updateCampaign(
   id: string,
   input: UpdateCampaignInput,
   _userId: string,
+  scope?: TeamRecordScope,
 ) {
   void _userId;
   const existing = await prisma.campaign.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Campaign not found");
+  assertMine(
+    existing,
+    scope,
+    [...CAMPAIGN_OWNER_KEYS],
+    "You can only access your own campaigns",
+  );
 
   const data: Prisma.CampaignUpdateInput = {
     name: input.name,
@@ -152,11 +179,17 @@ export async function updateCampaign(
   return withRoi(campaign);
 }
 
-export async function deleteCampaign(id: string) {
+export async function deleteCampaign(id: string, scope?: TeamRecordScope) {
   const existing = await prisma.campaign.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Campaign not found");
+  assertMine(
+    existing,
+    scope,
+    [...CAMPAIGN_OWNER_KEYS],
+    "You can only access your own campaigns",
+  );
 
   return prisma.campaign.update({
     where: { id },
@@ -167,12 +200,19 @@ export async function deleteCampaign(id: string) {
 export async function updateCampaignMetrics(
   id: string,
   input: UpdateCampaignMetricsInput,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.campaign.findFirst({
     where: { id, deletedAt: null },
     include: { metrics: true },
   });
   if (!existing) throw notFound("Campaign not found");
+  assertMine(
+    existing,
+    scope,
+    [...CAMPAIGN_OWNER_KEYS],
+    "You can only access your own campaigns",
+  );
 
   const metrics = await prisma.campaignMetric.upsert({
     where: { campaignId: id },

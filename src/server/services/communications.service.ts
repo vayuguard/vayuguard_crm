@@ -3,10 +3,16 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import type { PaginationInput } from "@/server/api/pagination";
 import {
+  applyMineScope,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+import {
   cuidSchema,
   emptyToNull,
   optionalCuid,
 } from "@/lib/validators/common";
+
+const COMMUNICATION_OWNER_KEYS = ["authorId"] as const;
 
 export const createCommunicationSchema = z.object({
   type: z.nativeEnum(CommunicationType),
@@ -40,6 +46,7 @@ const communicationInclude = {
 function buildWhere(
   filters: CommunicationFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.CommunicationWhereInput {
   const where: Prisma.CommunicationWhereInput = {};
   if (filters.type) where.type = filters.type;
@@ -53,19 +60,25 @@ function buildWhere(
   }
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { subject: { contains: term, mode: "insensitive" } },
-      { body: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { subject: { contains: term, mode: "insensitive" } },
+          { body: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...COMMUNICATION_OWNER_KEYS]);
 }
 
 export async function listCommunications(
   pagination: PaginationInput,
   filters: CommunicationFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.communication.count({ where }),
     prisma.communication.findMany({

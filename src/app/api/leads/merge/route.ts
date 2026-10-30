@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { mergeLeads } from "@/server/services/leads.service";
 import { mergeLeadsSchema } from "@/lib/validators/lead";
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = mergeLeadsSchema.parse(await request.json());
-    const lead = await mergeLeads(body, session.user.id);
+    const lead = await mergeLeads(body, session.user.id, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "LEAD_MERGE",

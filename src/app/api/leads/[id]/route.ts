@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteLead,
@@ -14,9 +15,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("leads:read");
+    const session = await requirePermission("leads:read");
     const { id } = await params;
-    const lead = await getLeadById(id);
+    const lead = await getLeadById(id, (await teamRecordScope(session)));
     return ok(lead);
   } catch (error) {
     return fail(error);
@@ -28,7 +29,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const session = await requirePermission("leads:write");
     const { id } = await params;
     const body = updateLeadSchema.parse(await request.json());
-    const lead = await updateLead(id, body, session.user.id);
+    const lead = await updateLead(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "LEAD_UPDATE",
@@ -50,7 +56,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("leads:delete");
     const { id } = await params;
-    const lead = await deleteLead(id, session.user.id);
+    const lead = await deleteLead(id, session.user.id, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "LEAD_DELETE",

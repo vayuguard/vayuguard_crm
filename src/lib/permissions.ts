@@ -166,3 +166,12 @@ export function hasPermission(
   const needed = Array.isArray(required) ? required : [required];
   return needed.every((p) => userPermissions.includes(p));
 }
+
+/** Admin / Super Admin see everyone's tasks & calendar; employees see only theirs. */
+export function canViewAllTeamRecords(
+  role?: string | null,
+  permissions?: string[] | undefined,
+) {
+  if (permissions?.includes("*")) return true;
+  return role === "SUPER_ADMIN" || role === "ADMIN";
+}

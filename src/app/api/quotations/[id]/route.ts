@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteQuotation,
@@ -14,9 +15,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("quotes:read");
+    const session = await requirePermission("quotes:read");
     const { id } = await params;
-    return ok(await getQuotationById(id));
+    return ok(await getQuotationById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -27,7 +28,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const session = await requirePermission("quotes:write");
     const { id } = await params;
     const body = updateQuotationSchema.parse(await request.json());
-    const quotation = await updateQuotation(id, body, session.user.id);
+    const quotation = await updateQuotation(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "QUOTATION_UPDATE",
@@ -49,7 +55,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("quotes:write");
     const { id } = await params;
-    const quotation = await deleteQuotation(id, session.user.id);
+    const quotation = await deleteQuotation(
+      id,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "QUOTATION_DELETE",

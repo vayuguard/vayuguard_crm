@@ -189,6 +189,14 @@ export function QuotationsView() {
     return () => clearTimeout(t);
   }, [search]);
 
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") !== "1") return;
+    form.reset({ ...emptyForm, customerId: params.get("customerId") ?? "" });
+    setCreateOpen(true);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [form]);
+
   const query = useQuery({
     queryKey: ["quotations", debounced, statusFilter],
     queryFn: async () => {
@@ -395,7 +403,7 @@ export function QuotationsView() {
             }}
           >
             <Plus className="size-4" />
-            New quotation
+            New quote
           </Button>
         ) : null}
       </div>

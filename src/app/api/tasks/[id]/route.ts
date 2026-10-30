@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   deleteTask,
@@ -14,9 +15,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("tasks:read");
+    const session = await requirePermission("tasks:read");
     const { id } = await params;
-    return ok(await getTaskById(id));
+    return ok(await getTaskById(id, (await teamRecordScope(session))));
   } catch (error) {
     return fail(error);
   }
@@ -27,7 +28,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const session = await requirePermission("tasks:write");
     const { id } = await params;
     const body = updateTaskSchema.parse(await request.json());
-    const task = await updateTask(id, body, session.user.id);
+    const task = await updateTask(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "TASK_UPDATE",
@@ -49,7 +55,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const session = await requirePermission("tasks:delete");
     const { id } = await params;
-    const task = await deleteTask(id, session.user.id);
+    const task = await deleteTask(id, session.user.id, (await teamRecordScope(session)));
 
     await writeAuditLog({
       action: "TASK_DELETE",

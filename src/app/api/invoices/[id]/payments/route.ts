@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { created, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { recordPayment } from "@/server/services/invoices.service";
 import { createPaymentSchema } from "@/lib/validators/invoice";
@@ -13,7 +14,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = await requirePermission("invoices:write");
     const { id } = await params;
     const body = createPaymentSchema.parse(await request.json());
-    const result = await recordPayment(id, body, session.user.id);
+    const result = await recordPayment(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "PAYMENT_CREATE",

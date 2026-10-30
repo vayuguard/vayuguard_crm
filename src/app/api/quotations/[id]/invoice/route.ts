@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { created, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { createInvoiceFromQuotation } from "@/server/services/invoices.service";
 import { getClientIp } from "@/server/api/rate-limit";
@@ -26,10 +27,15 @@ export async function POST(request: NextRequest, { params }: Params) {
     const { id } = await params;
     const json = await request.json().catch(() => ({}));
     const options = bodySchema.parse(json);
-    const invoice = await createInvoiceFromQuotation(id, session.user.id, {
-      dueDate: options.dueDate ?? undefined,
-      notes: options.notes,
-    });
+    const invoice = await createInvoiceFromQuotation(
+      id,
+      session.user.id,
+      {
+        dueDate: options.dueDate ?? undefined,
+        notes: options.notes,
+      },
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "QUOTE_TO_INVOICE",

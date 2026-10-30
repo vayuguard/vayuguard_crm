@@ -51,6 +51,11 @@ export const createCommissionSchema = z.object({
   notes: emptyToNull,
 });
 
+export const setManagerSchema = z.object({
+  userId: cuidSchema,
+  managerId: optionalCuid,
+});
+
 export const employeeFiltersSchema = z.object({
   department: z.string().optional(),
   isActive: z
@@ -68,6 +73,7 @@ export type UpdateEmployeeProfileInput = z.infer<
 export type CreateSalesTargetInput = z.infer<typeof createSalesTargetSchema>;
 export type CreateAttendanceInput = z.infer<typeof createAttendanceSchema>;
 export type CreateCommissionInput = z.infer<typeof createCommissionSchema>;
+export type SetManagerInput = z.infer<typeof setManagerSchema>;
 export type EmployeeFilters = z.infer<typeof employeeFiltersSchema>;
 
 const employeeInclude = {
@@ -113,6 +119,45 @@ function buildWhere(
   return where;
 }
 
+type UserLite = { id: string; name: string | null; email: string };
+
+/** Attach `manager` (who they report to) and `reportCount` to employee rows. */
+async function withHierarchy<
+  T extends { id: string; employeeProfile: { managerId: string | null } | null },
+>(users: T[]) {
+  const managerIds = [
+    ...new Set(
+      users
+        .map((u) => u.employeeProfile?.managerId)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const [managers, reportCounts] = await Promise.all([
+    managerIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: managerIds } },
+          select: { id: true, name: true, email: true },
+        })
+      : Promise.resolve([] as UserLite[]),
+    prisma.employeeProfile.groupBy({
+      by: ["managerId"],
+      where: { managerId: { in: users.map((u) => u.id) } },
+      _count: { _all: true },
+    }),
+  ]);
+  const managerMap = new Map(managers.map((m) => [m.id, m]));
+  const countMap = new Map(
+    reportCounts.map((r) => [r.managerId, r._count._all]),
+  );
+  return users.map((u) => ({
+    ...u,
+    manager: u.employeeProfile?.managerId
+      ? managerMap.get(u.employeeProfile.managerId) ?? null
+      : null,
+    reportCount: countMap.get(u.id) ?? 0,
+  }));
+}
+
 export async function listEmployees(
   pagination: PaginationInput,
   filters: EmployeeFilters = {},
@@ -128,7 +173,7 @@ export async function listEmployees(
       take: pagination.pageSize,
     }),
   ]);
-  return { items, total };
+  return { items: await withHierarchy(items), total };
 }
 
 export async function getEmployeeById(id: string) {
@@ -142,7 +187,46 @@ export async function getEmployeeById(id: string) {
     },
   });
   if (!user) throw notFound("Employee not found");
-  return user;
+  const [withManager] = await withHierarchy([user]);
+  const reports = await prisma.user.findMany({
+    where: { deletedAt: null, employeeProfile: { managerId: id } },
+    select: { id: true, name: true, email: true },
+    orderBy: { name: "asc" },
+  });
+  return { ...withManager, reports };
+}
+
+/** Set who an employee reports to. Creates the profile if it does not exist yet. */
+export async function setEmployeeManager(input: SetManagerInput) {
+  const managerId = input.managerId ?? null;
+  if (managerId === input.userId) {
+    throw validationError("An employee cannot report to themselves");
+  }
+
+  const user = await prisma.user.findFirst({
+    where: { id: input.userId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!user) throw notFound("User not found");
+
+  if (managerId) {
+    const manager = await prisma.user.findFirst({
+      where: { id: managerId, deletedAt: null },
+      select: { id: true, employeeProfile: { select: { managerId: true } } },
+    });
+    if (!manager) throw notFound("Manager not found");
+    if (manager.employeeProfile?.managerId === input.userId) {
+      throw validationError(
+        "That person already reports to this employee — pick someone else",
+      );
+    }
+  }
+
+  return prisma.employeeProfile.upsert({
+    where: { userId: input.userId },
+    create: { userId: input.userId, managerId },
+    update: { managerId },
+  });
 }
 
 export async function upsertEmployeeProfile(

@@ -1,8 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ExternalLink, Paperclip, UserPlus } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarPlus,
+  Check,
+  ExternalLink,
+  Kanban,
+  Paperclip,
+  UserPlus,
+} from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, unwrapList } from "@/lib/api-client";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -16,6 +25,24 @@ import { Separator } from "@/components/ui/separator";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { OwnerBadge } from "@/components/shared/owner-badge";
+import {
+  NextStepsBar,
+  QuickDealDialog,
+  QuickTaskDialog,
+} from "@/components/shared/next-steps";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  LEAD_STATUS_ORDER,
+  leadStatusLabel,
+  priorityLabel,
+} from "@/lib/labels";
 import * as React from "react";
 
 type LeadDetail = {
@@ -41,7 +68,8 @@ type LeadDetail = {
   notes?: string | null;
   customerId?: string | null;
   campaign?: { id?: string; name?: string } | null;
-  assignedTo?: { name?: string | null } | null;
+  assignedToId?: string | null;
+  assignedTo?: { id?: string; name?: string | null; email?: string | null } | null;
   tags?: { tag?: { name?: string } | null }[] | null;
   attachments?: Attachment[];
   createdAt?: string;
@@ -55,6 +83,23 @@ type Attachment = {
   fileSize?: number | null;
   createdAt?: string;
 };
+
+type LinkedTask = {
+  id: string;
+  title: string;
+  status: string;
+  dueAt?: string | null;
+  assignedTo?: { name?: string | null; email?: string | null } | null;
+};
+
+type LinkedDeal = {
+  id: string;
+  title: string;
+  expectedRevenue?: string | number | null;
+  stage?: { name: string } | null;
+};
+
+type Assignee = { id: string; name?: string | null; email?: string | null };
 
 type Activity = {
   id: string;
@@ -70,6 +115,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const [convertOpen, setConvertOpen] = React.useState(false);
+  const [taskOpen, setTaskOpen] = React.useState(false);
+  const [dealOpen, setDealOpen] = React.useState(false);
   const [fileName, setFileName] = React.useState("");
   const [fileUrl, setFileUrl] = React.useState("");
 
@@ -97,6 +144,60 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     },
   });
 
+  const linkedTasksQuery = useQuery({
+    queryKey: ["tasks", "lead", leadId],
+    queryFn: async () => {
+      const res = await apiFetch<unknown>(`/api/tasks?leadId=${leadId}`);
+      return unwrapList<LinkedTask>(res.data);
+    },
+    enabled: can("tasks:read"),
+  });
+
+  const linkedDealsQuery = useQuery({
+    queryKey: ["deals", "lead", leadId],
+    queryFn: async () => {
+      const res = await apiFetch<unknown>(`/api/deals?leadId=${leadId}`);
+      return unwrapList<LinkedDeal>(res.data);
+    },
+    enabled: can("deals:read"),
+  });
+
+  const assigneesQuery = useQuery({
+    queryKey: ["assignees"],
+    queryFn: async () => {
+      const res = await apiFetch<unknown>("/api/assignees");
+      return unwrapList<Assignee>(res.data);
+    },
+    enabled: can("leads:write"),
+    retry: false,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (data: { status?: string; assignedToId?: string | null }) =>
+      apiFetch(`/api/leads/${leadId}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: (_res, data) => {
+      toast.success(data.status ? "Stage updated" : "Person updated");
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const taskDoneMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "DONE" }),
+      }),
+    onSuccess: () => {
+      toast.success("Task marked done");
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const convertMutation = useMutation({
     mutationFn: async () =>
       apiFetch(`/api/leads/${leadId}/convert`, {
@@ -110,7 +211,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       const customerId = (res.data as { customer?: { id?: string } })?.customer
         ?.id;
       if (customerId) {
-        router.push("/customers");
+        router.push(`/customers/${customerId}`);
       } else {
         leadQuery.refetch();
         activitiesQuery.refetch();
@@ -166,6 +267,14 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     attachmentsQuery.data ?? lead.attachments ?? [];
   const canConvert =
     can(["leads:write", "customers:write"]) && !lead.customerId;
+  const openLinkedTasks = (linkedTasksQuery.data ?? []).filter(
+    (t) => t.status === "TODO" || t.status === "IN_PROGRESS",
+  );
+  const linkedDeals = linkedDealsQuery.data ?? [];
+  const leadLink = {
+    leadId: lead.id,
+    assignedToId: lead.assignedToId ?? lead.assignedTo?.id ?? null,
+  };
   const tagNames =
     lead.tags
       ?.map((t) => t.tag?.name)
@@ -191,26 +300,96 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">{lead.status}</Badge>
+          <OwnerBadge person={lead.assignedTo} />
+          <Badge variant="secondary">{leadStatusLabel(lead.status)}</Badge>
           {lead.priority ? (
-            <Badge variant="outline">{lead.priority}</Badge>
+            <Badge variant="outline">{priorityLabel(lead.priority)} priority</Badge>
+          ) : null}
+          {lead.customerId ? (
+            <Link href={`/customers/${lead.customerId}`}>
+              <Badge
+                variant="outline"
+                className="border-emerald-500/40 text-emerald-700"
+              >
+                Customer now — open
+              </Badge>
+            </Link>
+          ) : null}
+        </div>
+      </div>
+
+      {can("leads:write") ? (
+        <NextStepsBar hint="Update this lead as you talk to the customer.">
+          <Select
+            value={lead.status}
+            items={LEAD_STATUS_ORDER.map((s) => ({
+              value: s,
+              label: `Stage: ${leadStatusLabel(s)}`,
+            }))}
+            disabled={updateMutation.isPending}
+            onValueChange={(v) => v && updateMutation.mutate({ status: v })}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Stage" />
+            </SelectTrigger>
+            <SelectContent>
+              {LEAD_STATUS_ORDER.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {leadStatusLabel(s)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {assigneesQuery.data?.length ? (
+            <Select
+              value={lead.assignedToId ?? lead.assignedTo?.id ?? "__none__"}
+              items={[
+                { value: "__none__", label: "Handled by: nobody" },
+                ...assigneesQuery.data.map((a) => ({
+                  value: a.id,
+                  label: `Handled by: ${a.name || a.email || a.id}`,
+                })),
+              ]}
+              disabled={updateMutation.isPending}
+              onValueChange={(v) =>
+                updateMutation.mutate({
+                  assignedToId: !v || v === "__none__" ? null : v,
+                })
+              }
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Handled by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Nobody</SelectItem>
+                {assigneesQuery.data.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.name || a.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+          {can("tasks:write") ? (
+            <Button variant="outline" onClick={() => setTaskOpen(true)}>
+              <CalendarPlus className="size-4" />
+              Add follow-up
+            </Button>
+          ) : null}
+          {can("deals:write") ? (
+            <Button variant="outline" onClick={() => setDealOpen(true)}>
+              <Kanban className="size-4" />
+              Start a deal
+            </Button>
           ) : null}
           {canConvert ? (
             <Button onClick={() => setConvertOpen(true)}>
               <UserPlus className="size-4" />
-              Convert to customer
+              Make customer
             </Button>
           ) : null}
-          {lead.customerId ? (
-            <Badge
-              variant="outline"
-              className="border-emerald-500/40 text-emerald-700"
-            >
-              Converted
-            </Badge>
-          ) : null}
-        </div>
-      </div>
+        </NextStepsBar>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -240,7 +419,10 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               label="Expected close"
               value={formatDate(lead.expectedClosingDate)}
             />
-            <Field label="Owner" value={lead.assignedTo?.name} />
+            <Field
+              label="Handled by"
+              value={lead.assignedTo?.name ?? lead.assignedTo?.email ?? "Nobody yet"}
+            />
             <Field label="Created" value={formatDate(lead.createdAt)} />
             {tagNames.length ? (
               <div className="sm:col-span-2">
@@ -267,6 +449,69 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         </Card>
 
         <div className="space-y-4">
+          {can("tasks:read") || can("deals:read") ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-semibold">
+                  Follow-ups &amp; deals
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {openLinkedTasks.length === 0 && linkedDeals.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nothing planned yet. Use “Add follow-up” or “Start a deal”
+                    above.
+                  </p>
+                ) : null}
+                {openLinkedTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{task.title}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {task.dueAt ? `Due ${formatDate(task.dueAt)}` : "No due date"}
+                        {task.assignedTo
+                          ? ` · ${task.assignedTo.name ?? task.assignedTo.email}`
+                          : ""}
+                      </p>
+                    </div>
+                    {can("tasks:write") ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={taskDoneMutation.isPending}
+                        onClick={() => taskDoneMutation.mutate(task.id)}
+                      >
+                        <Check className="size-3.5" />
+                        Done
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+                {linkedDeals.map((deal) => (
+                  <Link
+                    key={deal.id}
+                    href="/pipeline"
+                    className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-2 transition-colors hover:bg-muted"
+                  >
+                    <Kanban className="size-4 shrink-0 text-primary" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{deal.title}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {formatCurrency(deal.expectedRevenue)}
+                      </p>
+                    </div>
+                    {deal.stage ? (
+                      <Badge variant="secondary">{deal.stage.name}</Badge>
+                    ) : null}
+                  </Link>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-semibold">Timeline</CardTitle>
@@ -392,6 +637,20 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           </Card>
         </div>
       </div>
+
+      <QuickTaskDialog
+        open={taskOpen}
+        onOpenChange={setTaskOpen}
+        link={leadLink}
+        defaultTitle={`Follow up with ${lead.name}`}
+      />
+      <QuickDealDialog
+        open={dealOpen}
+        onOpenChange={setDealOpen}
+        link={leadLink}
+        defaultTitle={lead.company ? `${lead.company} — ${lead.name}` : lead.name}
+        defaultValue={lead.estimatedDealValue}
+      />
 
       <ConfirmDialog
         open={convertOpen}

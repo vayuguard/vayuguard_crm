@@ -5,7 +5,13 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { NAV_ITEMS } from "@/lib/navigation";
+import {
+  NAV_GROUP_LABELS,
+  NAV_GROUP_ORDER,
+  NAV_ITEMS,
+  homePathForRole,
+  type NavItem,
+} from "@/lib/navigation";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useUiStore } from "@/stores/ui-store";
 import { BrandMark } from "@/components/brand/brand-mark";
@@ -54,11 +60,37 @@ function NavLinks({
     );
   }
 
+  const activeHref = items
+    .filter(
+      (item) =>
+        pathname === item.href || pathname.startsWith(`${item.href}/`),
+    )
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+
   return (
     <nav className="flex flex-col gap-0.5">
-      {items.map((item) => {
-        const active =
-          pathname === item.href || pathname.startsWith(`${item.href}/`);
+      {NAV_GROUP_ORDER.map((group, index) => {
+        const groupItems = items.filter((item) => item.group === group);
+        if (!groupItems.length) return null;
+        return (
+          <div key={group} className="flex flex-col gap-0.5 pb-3">
+            {collapsed ? (
+              index > 0 ? (
+                <div className="mx-3 mb-1 h-px bg-sidebar-border" />
+              ) : null
+            ) : (
+              <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {NAV_GROUP_LABELS[group]}
+              </p>
+            )}
+            {groupItems.map((item) => renderItem(item, item.href === activeHref))}
+          </div>
+        );
+      })}
+    </nav>
+  );
+
+  function renderItem(item: NavItem, active: boolean) {
         const Icon = item.icon;
         const className = cn(
           "group flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm font-medium transition-colors",
@@ -120,14 +152,13 @@ function NavLinks({
             <TooltipContent side="right">{item.title}</TooltipContent>
           </Tooltip>
         );
-      })}
-    </nav>
-  );
+  }
 }
 
 /** Desktop sidebar — hidden below md; collapse toggle for dense Super Admin menus. */
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar } = useUiStore();
+  const { role } = usePermissions();
 
   return (
     <TooltipProvider delay={200}>
@@ -139,7 +170,7 @@ export function Sidebar() {
       >
         <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-3">
           <Link
-            href="/dashboard"
+            href={homePathForRole(role)}
             className="flex min-w-0 flex-1 items-center overflow-hidden"
           >
             <BrandMark showText={!sidebarCollapsed} size={32} />

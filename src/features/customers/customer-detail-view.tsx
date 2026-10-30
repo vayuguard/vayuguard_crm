@@ -4,12 +4,19 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Plus } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarPlus,
+  FileText,
+  Kanban,
+  Pencil,
+  Plus,
+} from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { usePermissions } from "@/hooks/use-permissions";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +30,12 @@ import {
 } from "@/components/ui/dialog";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
+import { OwnerBadge } from "@/components/shared/owner-badge";
+import {
+  NextStepsBar,
+  QuickDealDialog,
+  QuickTaskDialog,
+} from "@/components/shared/next-steps";
 import {
   CustomerForm,
   toCustomerPayload,
@@ -154,6 +167,8 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
   const { can } = usePermissions();
   const [editOpen, setEditOpen] = React.useState(false);
   const [contactOpen, setContactOpen] = React.useState(false);
+  const [taskOpen, setTaskOpen] = React.useState(false);
+  const [dealOpen, setDealOpen] = React.useState(false);
   const [contactName, setContactName] = React.useState("");
   const [contactEmail, setContactEmail] = React.useState("");
   const [contactPhone, setContactPhone] = React.useState("");
@@ -223,6 +238,10 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
   }
 
   const c = query.data;
+  const customerLink = {
+    customerId: c.id,
+    assignedToId: c.assignedToId ?? c.assignedTo?.id ?? null,
+  };
   const nestedPayments =
     c.payments ??
     c.invoices?.flatMap((inv) =>
@@ -293,11 +312,7 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {c.assignedTo ? (
-            <Badge variant="outline">
-              {c.assignedTo.name ?? c.assignedTo.email}
-            </Badge>
-          ) : null}
+          <OwnerBadge person={c.assignedTo} />
           {can("customers:write") ? (
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil className="size-4" />
@@ -306,6 +321,56 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
           ) : null}
         </div>
       </div>
+
+      {can("quotes:write") ||
+      can("tasks:write") ||
+      can("deals:write") ||
+      can("contacts:write") ? (
+        <NextStepsBar hint="Everything for this customer is on this page.">
+          {can("tasks:write") ? (
+            <Button variant="outline" onClick={() => setTaskOpen(true)}>
+              <CalendarPlus className="size-4" />
+              Add follow-up
+            </Button>
+          ) : null}
+          {can("deals:write") ? (
+            <Button variant="outline" onClick={() => setDealOpen(true)}>
+              <Kanban className="size-4" />
+              Start a deal
+            </Button>
+          ) : null}
+          {can("contacts:write") ? (
+            <Button variant="outline" onClick={() => setContactOpen(true)}>
+              <Plus className="size-4" />
+              Add contact person
+            </Button>
+          ) : null}
+          {can("quotes:write") ? (
+            <Link
+              href={`/quotations?new=1&customerId=${c.id}`}
+              className={buttonVariants()}
+            >
+              <FileText className="size-4" />
+              Make a quote
+            </Link>
+          ) : null}
+        </NextStepsBar>
+      ) : null}
+
+      <QuickTaskDialog
+        open={taskOpen}
+        onOpenChange={setTaskOpen}
+        link={customerLink}
+        defaultTitle={`Follow up with ${c.name}`}
+        invalidateKeys={[["customers", customerId]]}
+      />
+      <QuickDealDialog
+        open={dealOpen}
+        onOpenChange={setDealOpen}
+        link={customerLink}
+        defaultTitle={c.name}
+        invalidateKeys={[["customers", customerId]]}
+      />
 
       <ZohoSyncBadge entityType="customer" crmId={c.id} />
 
@@ -347,8 +412,8 @@ export function CustomerDetailView({ customerId }: { customerId: string }) {
             <DetailRow label="GST" value={c.gstNumber} />
             <DetailRow label="PAN" value={c.panNumber} />
             <DetailRow
-              label="Assignee"
-              value={c.assignedTo?.name ?? c.assignedTo?.email}
+              label="Handled by"
+              value={c.assignedTo?.name ?? c.assignedTo?.email ?? "Unassigned"}
             />
             <DetailRow
               label="Billing"

@@ -27,6 +27,7 @@ import { usePermissions } from "@/hooks/use-permissions";
 import { Badge } from "@/components/ui/badge";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
+import { OwnerBadge } from "@/components/shared/owner-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -70,6 +71,7 @@ type Deal = {
   stageId?: string;
   pipelineId?: string;
   customer?: { name?: string } | null;
+  assignedTo?: { name?: string | null; email?: string | null } | null;
   probability?: number | null;
 };
 
@@ -163,6 +165,22 @@ export function PipelineView() {
       setStageId("");
       setCustomerId("");
       queryClient.invalidateQueries({ queryKey: ["deals"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const ensurePipelineMutation = useMutation({
+    mutationFn: async () =>
+      apiFetch("/api/pipelines", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "Default Sales Pipeline",
+          isDefault: true,
+        }),
+      }),
+    onSuccess: () => {
+      toast.success("Pipeline created");
+      queryClient.invalidateQueries({ queryKey: ["pipelines"] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -305,7 +323,19 @@ export function PipelineView() {
     return (
       <EmptyState
         title="No pipeline stages"
-        description="Create a pipeline with stages via /api/pipelines."
+        description="Set up a sales pipeline with stages (New → Qualified → Proposal → Won/Lost), then create deals and drag them across stages."
+        action={
+          can("deals:write") ? (
+            <Button
+              onClick={() => ensurePipelineMutation.mutate()}
+              disabled={ensurePipelineMutation.isPending}
+            >
+              {ensurePipelineMutation.isPending
+                ? "Creating…"
+                : "Create default pipeline"}
+            </Button>
+          ) : undefined
+        }
       />
     );
   }
@@ -412,8 +442,8 @@ export function PipelineView() {
 
       {!deals.length && !dealsQuery.isError ? (
         <EmptyState
-          title="Pipeline is empty"
-          description="Create a deal, then drag cards between stages."
+          title="No deals yet"
+          description="Press “New deal” to add a possible sale. Then drag its card to the next column as the customer moves forward."
           action={
             can("deals:write") ? (
               <Button onClick={() => setCreateOpen(true)}>
@@ -593,6 +623,7 @@ function DealCard({ deal, dragging }: { deal: Deal; dragging?: boolean }) {
         <p className="text-xs font-semibold text-primary">
           {formatCurrency(deal.expectedRevenue ?? deal.value)}
         </p>
+        <OwnerBadge person={deal.assignedTo} compact />
       </CardContent>
     </Card>
   );

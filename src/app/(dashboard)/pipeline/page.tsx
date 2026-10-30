@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/shared/page-header";
 import { PipelineView } from "@/features/pipeline/pipeline-view";
 
-export const metadata: Metadata = { title: "Pipeline" };
+export const metadata: Metadata = { title: "Deals board" };
 
 export default function PipelinePage() {
   return (
     <>
       <PageHeader
-        title="Pipeline"
-        description="Drag deals across stages to update your forecast."
+        title="Deals board"
+        description="Each card is a possible sale. Drag a card to the next column when the customer moves forward."
       />
       <PipelineView />
     </>

@@ -2,12 +2,20 @@ import { type Prisma, TicketStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { notFound } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
+import {
+  applyMineScope,
+  assertMine,
+  canFilterByUser,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
 import type {
   CreateTicketInput,
   CreateTicketMessageInput,
   TicketFilters,
   UpdateTicketInput,
 } from "@/lib/validators/ticket";
+
+const TICKET_OWNER_KEYS = ["assignedToId", "createdById"] as const;
 
 const ticketInclude = {
   customer: { select: { id: true, name: true, customerNumber: true } },
@@ -32,6 +40,7 @@ async function nextTicketNumber() {
 function buildWhere(
   filters: TicketFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.SupportTicketWhereInput {
   const where: Prisma.SupportTicketWhereInput = { deletedAt: null };
   if (filters.status) where.status = filters.status;
@@ -40,7 +49,9 @@ function buildWhere(
     where.department = { contains: filters.department, mode: "insensitive" };
   }
   if (filters.customerId) where.customerId = filters.customerId;
-  if (filters.assignedToId) where.assignedToId = filters.assignedToId;
+  if (canFilterByUser(scope, filters.assignedToId)) {
+    where.assignedToId = filters.assignedToId;
+  }
   if (filters.from || filters.to) {
     where.createdAt = {};
     if (filters.from) where.createdAt.gte = filters.from;
@@ -48,20 +59,25 @@ function buildWhere(
   }
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { ticketNumber: { contains: term, mode: "insensitive" } },
-      { subject: { contains: term, mode: "insensitive" } },
-      { description: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      {
+        OR: [
+          { ticketNumber: { contains: term, mode: "insensitive" } },
+          { subject: { contains: term, mode: "insensitive" } },
+          { description: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...TICKET_OWNER_KEYS]);
 }
 
 export async function listTickets(
   pagination: PaginationInput,
   filters: TicketFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.supportTicket.count({ where }),
     prisma.supportTicket.findMany({
@@ -75,7 +91,7 @@ export async function listTickets(
   return { items, total };
 }
 
-export async function getTicketById(id: string) {
+export async function getTicketById(id: string, scope?: TeamRecordScope) {
   const ticket = await prisma.supportTicket.findFirst({
     where: { id, deletedAt: null },
     include: {
@@ -90,6 +106,12 @@ export async function getTicketById(id: string) {
     },
   });
   if (!ticket) throw notFound("Ticket not found");
+  assertMine(
+    ticket,
+    scope,
+    [...TICKET_OWNER_KEYS],
+    "You can only access your own tickets",
+  );
   return ticket;
 }
 
@@ -118,11 +140,18 @@ export async function updateTicket(
   id: string,
   input: UpdateTicketInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.supportTicket.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Ticket not found");
+  assertMine(
+    existing,
+    scope,
+    [...TICKET_OWNER_KEYS],
+    "You can only access your own tickets",
+  );
 
   const resolved =
     input.status === TicketStatus.RESOLVED ||
@@ -143,11 +172,21 @@ export async function updateTicket(
   });
 }
 
-export async function deleteTicket(id: string, userId: string) {
+export async function deleteTicket(
+  id: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.supportTicket.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Ticket not found");
+  assertMine(
+    existing,
+    scope,
+    [...TICKET_OWNER_KEYS],
+    "You can only access your own tickets",
+  );
 
   return prisma.supportTicket.update({
     where: { id },
@@ -158,12 +197,19 @@ export async function deleteTicket(id: string, userId: string) {
 export async function listTicketMessages(
   ticketId: string,
   pagination: PaginationInput,
+  scope?: TeamRecordScope,
 ) {
   const ticket = await prisma.supportTicket.findFirst({
     where: { id: ticketId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, assignedToId: true, createdById: true },
   });
   if (!ticket) throw notFound("Ticket not found");
+  assertMine(
+    ticket,
+    scope,
+    [...TICKET_OWNER_KEYS],
+    "You can only access your own tickets",
+  );
 
   const where = { ticketId };
   const [total, items] = await Promise.all([
@@ -185,11 +231,18 @@ export async function createTicketMessage(
   ticketId: string,
   input: CreateTicketMessageInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const ticket = await prisma.supportTicket.findFirst({
     where: { id: ticketId, deletedAt: null },
   });
   if (!ticket) throw notFound("Ticket not found");
+  assertMine(
+    ticket,
+    scope,
+    [...TICKET_OWNER_KEYS],
+    "You can only access your own tickets",
+  );
 
   const message = await prisma.$transaction(async (tx) => {
     const created = await tx.ticketMessage.create({

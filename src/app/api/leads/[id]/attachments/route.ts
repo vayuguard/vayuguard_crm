@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ok, created, fail } from "@/server/api/response";
 import { requirePermission } from "@/server/auth/session";
+import { teamRecordScope } from "@/server/auth/team-scope";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   createLeadAttachment,
@@ -13,9 +14,9 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    await requirePermission("leads:read");
+    const session = await requirePermission("leads:read");
     const { id } = await params;
-    const lead = await getLeadById(id);
+    const lead = await getLeadById(id, (await teamRecordScope(session)));
     return ok(lead.attachments ?? []);
   } catch (error) {
     return fail(error);
@@ -27,7 +28,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = await requirePermission("leads:write");
     const { id } = await params;
     const body = createLeadAttachmentSchema.parse(await request.json());
-    const attachment = await createLeadAttachment(id, body, session.user.id);
+    const attachment = await createLeadAttachment(
+      id,
+      body,
+      session.user.id,
+      (await teamRecordScope(session)),
+    );
 
     await writeAuditLog({
       action: "LEAD_ATTACHMENT_CREATE",

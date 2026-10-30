@@ -2,6 +2,11 @@ import { type Prisma, QuotationStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { notFound, validationError } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
+import {
+  applyMineScope,
+  assertMine,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
 import { emailProvider } from "@/server/providers/email";
 import type {
   CreateQuotationInput,
@@ -10,6 +15,8 @@ import type {
   QuotationItemInput,
   UpdateQuotationInput,
 } from "@/lib/validators/quotation";
+
+const QUOTATION_OWNER_KEYS = ["createdById"] as const;
 
 const quotationInclude = {
   customer: { select: { id: true, name: true, customerNumber: true, email: true } },
@@ -72,6 +79,7 @@ async function nextQuoteNumber() {
 function buildWhere(
   filters: QuotationFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.QuotationWhereInput {
   const where: Prisma.QuotationWhereInput = { deletedAt: null };
   if (filters.status) where.status = filters.status;
@@ -84,20 +92,26 @@ function buildWhere(
   }
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { quoteNumber: { contains: term, mode: "insensitive" } },
-      { notes: { contains: term, mode: "insensitive" } },
-      { customer: { name: { contains: term, mode: "insensitive" } } },
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { quoteNumber: { contains: term, mode: "insensitive" } },
+          { notes: { contains: term, mode: "insensitive" } },
+          { customer: { name: { contains: term, mode: "insensitive" } } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...QUOTATION_OWNER_KEYS]);
 }
 
 export async function listQuotations(
   pagination: PaginationInput,
   filters: QuotationFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.quotation.count({ where }),
     prisma.quotation.findMany({
@@ -111,7 +125,7 @@ export async function listQuotations(
   return { items, total };
 }
 
-export async function getQuotationById(id: string) {
+export async function getQuotationById(id: string, scope?: TeamRecordScope) {
   const quotation = await prisma.quotation.findFirst({
     where: { id, deletedAt: null },
     include: {
@@ -120,6 +134,12 @@ export async function getQuotationById(id: string) {
     },
   });
   if (!quotation) throw notFound("Quotation not found");
+  assertMine(
+    quotation,
+    scope,
+    [...QUOTATION_OWNER_KEYS],
+    "You can only access your own quotations",
+  );
   return quotation;
 }
 
@@ -179,12 +199,19 @@ export async function updateQuotation(
   id: string,
   input: UpdateQuotationInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.quotation.findFirst({
     where: { id, deletedAt: null },
     include: { items: true },
   });
   if (!existing) throw notFound("Quotation not found");
+  assertMine(
+    existing,
+    scope,
+    [...QUOTATION_OWNER_KEYS],
+    "You can only access your own quotations",
+  );
   if (existing.status === QuotationStatus.APPROVED) {
     throw validationError("Approved quotations cannot be edited");
   }
@@ -256,11 +283,21 @@ export async function updateQuotation(
   });
 }
 
-export async function deleteQuotation(id: string, userId: string) {
+export async function deleteQuotation(
+  id: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.quotation.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Quotation not found");
+  assertMine(
+    existing,
+    scope,
+    [...QUOTATION_OWNER_KEYS],
+    "You can only access your own quotations",
+  );
 
   return prisma.quotation.update({
     where: { id },
@@ -268,11 +305,21 @@ export async function deleteQuotation(id: string, userId: string) {
   });
 }
 
-export async function approveQuotation(id: string, userId: string) {
+export async function approveQuotation(
+  id: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.quotation.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Quotation not found");
+  assertMine(
+    existing,
+    scope,
+    [...QUOTATION_OWNER_KEYS],
+    "You can only access your own quotations",
+  );
   if (existing.status === QuotationStatus.APPROVED) {
     throw validationError("Quotation is already approved");
   }
@@ -292,8 +339,11 @@ export async function approveQuotation(id: string, userId: string) {
   });
 }
 
-export async function getQuotationPdfPayload(id: string) {
-  const quotation = await getQuotationById(id);
+export async function getQuotationPdfPayload(
+  id: string,
+  scope?: TeamRecordScope,
+) {
+  const quotation = await getQuotationById(id, scope);
   return {
     type: "quotation" as const,
     quoteNumber: quotation.quoteNumber,
@@ -332,9 +382,10 @@ export async function emailQuotation(
   id: string,
   input: EmailQuotationInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
-  const quotation = await getQuotationById(id);
-  const payload = await getQuotationPdfPayload(id);
+  const quotation = await getQuotationById(id, scope);
+  const payload = await getQuotationPdfPayload(id, scope);
   const subject =
     input.subject ?? `Quotation ${quotation.quoteNumber} from VayuCrm`;
 

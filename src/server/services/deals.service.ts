@@ -4,16 +4,25 @@ import { prisma } from "@/server/db/client";
 import { notFound, validationError } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
 import {
-  cuidSchema,
+  applyMineScope,
+  assertMine,
+  canFilterByUser,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+import {
   emptyToNull,
+  entityIdSchema,
   optionalCuid,
   optionalDate,
 } from "@/lib/validators/common";
 
+const OWNER_KEYS = ["assignedToId", "createdById"] as const;
+
 export const createDealSchema = z.object({
   title: z.string().trim().min(1).max(200),
-  pipelineId: cuidSchema,
-  stageId: cuidSchema,
+  // Seeded default pipeline uses id "default-pipeline" (not a cuid).
+  pipelineId: entityIdSchema,
+  stageId: entityIdSchema,
   leadId: optionalCuid,
   customerId: optionalCuid,
   assignedToId: optionalCuid,
@@ -27,14 +36,14 @@ export const createDealSchema = z.object({
 export const updateDealSchema = createDealSchema.partial();
 
 export const moveDealSchema = z.object({
-  stageId: cuidSchema,
+  stageId: entityIdSchema,
   position: z.coerce.number().int().optional(),
   note: emptyToNull,
 });
 
 export const dealFiltersSchema = z.object({
-  pipelineId: z.string().cuid().optional(),
-  stageId: z.string().cuid().optional(),
+  pipelineId: entityIdSchema.optional(),
+  stageId: entityIdSchema.optional(),
   assignedToId: z.string().cuid().optional(),
   leadId: z.string().cuid().optional(),
   customerId: z.string().cuid().optional(),
@@ -56,28 +65,37 @@ const dealInclude = {
 function buildWhere(
   filters: DealFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.DealWhereInput {
   const where: Prisma.DealWhereInput = { deletedAt: null };
   if (filters.pipelineId) where.pipelineId = filters.pipelineId;
   if (filters.stageId) where.stageId = filters.stageId;
-  if (filters.assignedToId) where.assignedToId = filters.assignedToId;
+  if (canFilterByUser(scope, filters.assignedToId)) {
+    where.assignedToId = filters.assignedToId;
+  }
   if (filters.leadId) where.leadId = filters.leadId;
   if (filters.customerId) where.customerId = filters.customerId;
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { title: { contains: term, mode: "insensitive" } },
-      { notes: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { title: { contains: term, mode: "insensitive" } },
+          { notes: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...OWNER_KEYS]);
 }
 
 export async function listDeals(
   pagination: PaginationInput,
   filters: DealFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.deal.count({ where }),
     prisma.deal.findMany({
@@ -91,7 +109,7 @@ export async function listDeals(
   return { items, total };
 }
 
-export async function getDealById(id: string) {
+export async function getDealById(id: string, scope?: TeamRecordScope) {
   const deal = await prisma.deal.findFirst({
     where: { id, deletedAt: null },
     include: {
@@ -108,6 +126,7 @@ export async function getDealById(id: string) {
     },
   });
   if (!deal) throw notFound("Deal not found");
+  assertMine(deal, scope, [...OWNER_KEYS], "You can only access your own deals");
   return deal;
 }
 
@@ -163,11 +182,18 @@ export async function updateDeal(
   id: string,
   input: UpdateDealInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.deal.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Deal not found");
+  assertMine(
+    existing,
+    scope,
+    [...OWNER_KEYS],
+    "You can only access your own deals",
+  );
 
   const pipelineId = input.pipelineId ?? existing.pipelineId;
   const stageId = input.stageId ?? existing.stageId;
@@ -212,11 +238,18 @@ export async function moveDeal(
   id: string,
   input: MoveDealInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.deal.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Deal not found");
+  assertMine(
+    existing,
+    scope,
+    [...OWNER_KEYS],
+    "You can only access your own deals",
+  );
 
   const stage = await assertStageInPipeline(existing.pipelineId, input.stageId);
 
@@ -250,11 +283,21 @@ export async function moveDeal(
   });
 }
 
-export async function deleteDeal(id: string, userId: string) {
+export async function deleteDeal(
+  id: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.deal.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Deal not found");
+  assertMine(
+    existing,
+    scope,
+    [...OWNER_KEYS],
+    "You can only access your own deals",
+  );
 
   return prisma.deal.update({
     where: { id },

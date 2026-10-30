@@ -6,6 +6,7 @@ import {
   optionalCuid,
 } from "@/lib/validators/common";
 import { googleCalendarProvider } from "@/server/providers/calendar";
+import type { TeamRecordScope } from "@/server/auth/team-scope";
 
 export const calendarQuerySchema = z.object({
   from: z.coerce.date(),
@@ -30,12 +31,20 @@ export const createCalendarEventSchema = z.object({
 export type CalendarQuery = z.infer<typeof calendarQuerySchema>;
 export type CreateCalendarEventInput = z.infer<typeof createCalendarEventSchema>;
 
-export async function getCalendarFeed(query: CalendarQuery) {
+export type CalendarFeedScope = TeamRecordScope;
+
+export async function getCalendarFeed(
+  query: CalendarQuery,
+  scope?: CalendarFeedScope,
+) {
   const from = startOfDay(query.from);
   const to = endOfDay(query.to);
   const typeFilter = query.types
     ? query.types.split(",").map((t) => t.trim()).filter(Boolean)
     : null;
+
+  const employeeOnly = scope && !scope.seeAll;
+  const team = { in: scope?.teamUserIds ?? [] };
 
   const [meetings, tasks, events] = await Promise.all([
     prisma.meeting.findMany({
@@ -43,7 +52,13 @@ export async function getCalendarFeed(query: CalendarQuery) {
         deletedAt: null,
         startsAt: { lte: to },
         endsAt: { gte: from },
-        ...(query.organizerId ? { organizerId: query.organizerId } : {}),
+        ...(employeeOnly
+          ? {
+              OR: [{ organizerId: team }, { createdById: team }],
+            }
+          : query.organizerId
+            ? { organizerId: query.organizerId }
+            : {}),
       },
       include: {
         organizer: {
@@ -58,7 +73,13 @@ export async function getCalendarFeed(query: CalendarQuery) {
       where: {
         deletedAt: null,
         dueAt: { gte: from, lte: to },
-        ...(query.assignedToId ? { assignedToId: query.assignedToId } : {}),
+        ...(employeeOnly
+          ? {
+              OR: [{ assignedToId: team }, { createdById: team }],
+            }
+          : query.assignedToId
+            ? { assignedToId: query.assignedToId }
+            : {}),
       },
       include: {
         assignedTo: {
@@ -74,6 +95,7 @@ export async function getCalendarFeed(query: CalendarQuery) {
         startsAt: { lte: to },
         endsAt: { gte: from },
         ...(typeFilter ? { eventType: { in: typeFilter } } : {}),
+        ...(employeeOnly ? { createdById: team } : {}),
       },
       orderBy: { startsAt: "asc" },
     }),

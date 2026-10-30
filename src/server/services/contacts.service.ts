@@ -4,6 +4,11 @@ import { prisma } from "@/server/db/client";
 import { notFound, validationError } from "@/server/api/errors";
 import type { PaginationInput } from "@/server/api/pagination";
 import {
+  applyMineScope,
+  assertMine,
+  type TeamRecordScope,
+} from "@/server/auth/team-scope";
+import {
   cuidSchema,
   emptyToNull,
   optionalCuid,
@@ -13,6 +18,8 @@ import {
 } from "@/lib/validators/common";
 import { pickColumn } from "@/server/lib/excel";
 import { createLead, nextCustomerNumber } from "@/server/services/leads.service";
+
+const CONTACT_OWNER_KEYS = ["createdById"] as const;
 
 export const createContactSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -90,28 +97,35 @@ async function attributionTagName(userId: string) {
 function buildWhere(
   filters: ContactFilters,
   q?: string,
+  scope?: TeamRecordScope,
 ): Prisma.ContactWhereInput {
   const where: Prisma.ContactWhereInput = { deletedAt: null };
   if (filters.customerId) where.customerId = filters.customerId;
   if (filters.tagId) where.tags = { some: { tagId: filters.tagId } };
   if (q?.trim()) {
     const term = q.trim();
-    where.OR = [
-      { name: { contains: term, mode: "insensitive" } },
-      { email: { contains: term, mode: "insensitive" } },
-      { phone: { contains: term, mode: "insensitive" } },
-      { designation: { contains: term, mode: "insensitive" } },
-      { department: { contains: term, mode: "insensitive" } },
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { name: { contains: term, mode: "insensitive" } },
+          { email: { contains: term, mode: "insensitive" } },
+          { phone: { contains: term, mode: "insensitive" } },
+          { designation: { contains: term, mode: "insensitive" } },
+          { department: { contains: term, mode: "insensitive" } },
+        ],
+      },
     ];
   }
-  return where;
+  return applyMineScope(where, scope, [...CONTACT_OWNER_KEYS]);
 }
 
 export async function listContacts(
   pagination: PaginationInput,
   filters: ContactFilters = {},
+  scope?: TeamRecordScope,
 ) {
-  const where = buildWhere(filters, pagination.q);
+  const where = buildWhere(filters, pagination.q, scope);
   const [total, items] = await Promise.all([
     prisma.contact.count({ where }),
     prisma.contact.findMany({
@@ -129,12 +143,18 @@ export async function listContacts(
   return { items, total };
 }
 
-export async function getContactById(id: string) {
+export async function getContactById(id: string, scope?: TeamRecordScope) {
   const contact = await prisma.contact.findFirst({
     where: { id, deletedAt: null },
     include: contactInclude,
   });
   if (!contact) throw notFound("Contact not found");
+  assertMine(
+    contact,
+    scope,
+    [...CONTACT_OWNER_KEYS],
+    "You can only access your own contacts",
+  );
   return contact;
 }
 
@@ -194,11 +214,18 @@ export async function updateContact(
   id: string,
   input: UpdateContactInput,
   userId: string,
+  scope?: TeamRecordScope,
 ) {
   const existing = await prisma.contact.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Contact not found");
+  assertMine(
+    existing,
+    scope,
+    [...CONTACT_OWNER_KEYS],
+    "You can only access your own contacts",
+  );
 
   const { tagIds, tags, ...data } = input;
   const shouldUpdateTags = tagIds !== undefined || tags !== undefined;
@@ -245,11 +272,21 @@ export async function updateContact(
   });
 }
 
-export async function deleteContact(id: string, userId: string) {
+export async function deleteContact(
+  id: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const existing = await prisma.contact.findFirst({
     where: { id, deletedAt: null },
   });
   if (!existing) throw notFound("Contact not found");
+  assertMine(
+    existing,
+    scope,
+    [...CONTACT_OWNER_KEYS],
+    "You can only access your own contacts",
+  );
 
   return prisma.contact.update({
     where: { id },
@@ -343,8 +380,9 @@ function normalizeDepartmentValue(raw: string): string | null {
 export async function exportContacts(
   filters: ContactFilters = {},
   q?: string,
+  scope?: TeamRecordScope,
 ): Promise<ContactExcelRow[]> {
-  const where = buildWhere(filters, q);
+  const where = buildWhere(filters, q, scope);
   const contacts = await prisma.contact.findMany({
     where,
     include: {
@@ -536,7 +574,11 @@ function companyFromContactNotes(notes: string | null | undefined) {
 }
 
 /** Create a Lead from a Contact person (Contact stays; no hard link). */
-export async function convertContactToLead(contactId: string, userId: string) {
+export async function convertContactToLead(
+  contactId: string,
+  userId: string,
+  scope?: TeamRecordScope,
+) {
   const contact = await prisma.contact.findFirst({
     where: { id: contactId, deletedAt: null },
     include: {
@@ -547,6 +589,12 @@ export async function convertContactToLead(contactId: string, userId: string) {
     },
   });
   if (!contact) throw notFound("Contact not found");
+  assertMine(
+    contact,
+    scope,
+    [...CONTACT_OWNER_KEYS],
+    "You can only access your own contacts",
+  );
 
   const company =
     contact.customer?.name ||
@@ -596,11 +644,18 @@ export async function convertContactToCustomer(
   contactId: string,
   userId: string,
   options: { companyName?: string | null } = {},
+  scope?: TeamRecordScope,
 ) {
   const contact = await prisma.contact.findFirst({
     where: { id: contactId, deletedAt: null },
   });
   if (!contact) throw notFound("Contact not found");
+  assertMine(
+    contact,
+    scope,
+    [...CONTACT_OWNER_KEYS],
+    "You can only access your own contacts",
+  );
   if (contact.customerId) {
     throw validationError("Contact is already linked to a customer", {
       customerId: contact.customerId,

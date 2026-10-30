@@ -14,7 +14,11 @@ function toNumber(value: unknown) {
 
 export async function getDashboardData(options?: {
   userId?: string;
+  /** Users whose records count (self, or a manager's team). Defaults to [userId]. */
+  userIds?: string[];
   scopeToUser?: boolean;
+  /** When true, tasks/meetings are limited to the scoped users (employees always). */
+  scopePersonalSchedule?: boolean;
 }) {
   const now = new Date();
   const todayStart = startOfDay(now);
@@ -24,12 +28,29 @@ export async function getDashboardData(options?: {
   const prevMonthStart = startOfMonth(subMonths(now, 1));
   const prevMonthEnd = endOfMonth(subMonths(now, 1));
 
-  const assigneeFilter =
-    options?.scopeToUser && options.userId
-      ? { assignedToId: options.userId }
+  const ids =
+    options?.userIds?.length
+      ? options.userIds
+      : options?.userId
+        ? [options.userId]
+        : [];
+  const idMatch = { in: ids };
+
+  // Leads/deals: assignee OR creator when scoped.
+  const scopeLeadDeal =
+    options?.scopeToUser && ids.length
+      ? { OR: [{ assignedToId: idMatch }, { createdById: idMatch }] }
       : {};
+  const scheduleScoped = !!options?.scopePersonalSchedule && ids.length > 0;
+  const myTasks = scheduleScoped
+    ? { OR: [{ assignedToId: idMatch }, { createdById: idMatch }] }
+    : {};
+  const myMeetings = scheduleScoped
+    ? { OR: [{ organizerId: idMatch }, { createdById: idMatch }] }
+    : {};
 
   const soft = { deletedAt: null };
+  const scopedLeads = { ...soft, ...scopeLeadDeal };
 
   const [
     totalLeads,
@@ -48,14 +69,13 @@ export async function getDashboardData(options?: {
     wonDealsThisMonth,
   ] = await Promise.all([
     // 1. Total Leads
-    prisma.lead.count({ where: soft }),
+    prisma.lead.count({ where: scopedLeads }),
 
     // 2. Active Leads (not WON/LOST)
     prisma.lead.count({
       where: {
-        ...soft,
+        ...scopedLeads,
         status: { notIn: ["WON", "LOST"] },
-        ...assigneeFilter,
       },
     }),
 
@@ -66,9 +86,7 @@ export async function getDashboardData(options?: {
         type: { in: ["FOLLOW_UP", "CALL", "REMINDER"] },
         status: { in: ["TODO", "IN_PROGRESS"] },
         dueAt: { gte: todayStart, lte: todayEnd },
-        ...(options?.scopeToUser && options.userId
-          ? { assignedToId: options.userId }
-          : {}),
+        ...myTasks,
       },
     }),
 
@@ -77,7 +95,7 @@ export async function getDashboardData(options?: {
       where: {
         ...soft,
         stage: { isWon: true },
-        ...assigneeFilter,
+        ...scopeLeadDeal,
       },
     }),
 
@@ -86,25 +104,35 @@ export async function getDashboardData(options?: {
       where: {
         ...soft,
         stage: { isLost: true },
-        ...assigneeFilter,
+        ...scopeLeadDeal,
       },
     }),
 
     // 6. Monthly Revenue (payments this month)
     prisma.payment.aggregate({
-      where: { paidAt: { gte: monthStart, lte: monthEnd } },
+      where: {
+        paidAt: { gte: monthStart, lte: monthEnd },
+        ...(options?.scopeToUser && ids.length
+          ? { createdById: idMatch }
+          : {}),
+      },
       _sum: { amount: true },
     }),
 
     prisma.payment.aggregate({
-      where: { paidAt: { gte: prevMonthStart, lte: prevMonthEnd } },
+      where: {
+        paidAt: { gte: prevMonthStart, lte: prevMonthEnd },
+        ...(options?.scopeToUser && ids.length
+          ? { createdById: idMatch }
+          : {}),
+      },
       _sum: { amount: true },
     }),
 
     // 7. Lead Sources
     prisma.lead.groupBy({
       by: ["source"],
-      where: soft,
+      where: scopedLeads,
       _count: { _all: true },
       orderBy: { _count: { source: "desc" } },
     }),
@@ -112,7 +140,7 @@ export async function getDashboardData(options?: {
     // 8. Sales Funnel (lead statuses)
     prisma.lead.groupBy({
       by: ["status"],
-      where: soft,
+      where: scopedLeads,
       _count: { _all: true },
     }),
 
@@ -132,7 +160,12 @@ export async function getDashboardData(options?: {
           },
         },
       },
-      where: { lead: { deletedAt: null } },
+      where: {
+        lead: {
+          deletedAt: null,
+          ...scopeLeadDeal,
+        },
+      },
     }),
 
     // 10. Tasks Due (overdue + next 7 days)
@@ -143,9 +176,7 @@ export async function getDashboardData(options?: {
         dueAt: {
           lte: endOfDay(new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)),
         },
-        ...(options?.scopeToUser && options.userId
-          ? { assignedToId: options.userId }
-          : {}),
+        ...myTasks,
       },
       include: {
         assignedTo: {
@@ -163,9 +194,7 @@ export async function getDashboardData(options?: {
       where: {
         deletedAt: null,
         startsAt: { gte: now },
-        ...(options?.scopeToUser && options.userId
-          ? { organizerId: options.userId }
-          : {}),
+        ...myMeetings,
       },
       include: {
         organizer: {
@@ -186,6 +215,7 @@ export async function getDashboardData(options?: {
         stage: { isWon: true },
         closedAt: { gte: monthStart, lte: monthEnd },
         assignedToId: { not: null },
+        ...scopeLeadDeal,
       },
       _count: { _all: true },
       _sum: { expectedRevenue: true },
@@ -196,7 +226,7 @@ export async function getDashboardData(options?: {
         ...soft,
         stage: { isWon: true },
         closedAt: { gte: monthStart, lte: monthEnd },
-        ...assigneeFilter,
+        ...scopeLeadDeal,
       },
       _sum: { expectedRevenue: true },
       _count: { _all: true },
