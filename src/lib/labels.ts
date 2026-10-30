@@ -45,3 +45,21 @@ export function priorityLabel(priority?: string | null) {
   if (!priority) return "—";
   return PRIORITY_LABELS[priority] ?? priority;
 }
+
+/** How the employee talked to the client (stored on LeadActivity.type). */
+export const TALK_TYPE_OPTIONS = [
+  { value: "CALL", label: "Call" },
+  { value: "VISIT", label: "Visit" },
+  { value: "WHATSAPP", label: "WhatsApp" },
+  { value: "EMAIL", label: "Email" },
+  { value: "NOTE", label: "Other" },
+] as const;
+
+export const TALK_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  TALK_TYPE_OPTIONS.map((o) => [o.value, o.label]),
+);
+
+export function talkTypeLabel(type?: string | null) {
+  if (!type) return "Note";
+  return TALK_TYPE_LABELS[type] ?? type.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+}

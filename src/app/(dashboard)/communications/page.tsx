@@ -9,7 +9,7 @@ export default function CommunicationsPage() {
     <>
       <PageHeader
         title="Messages"
-        description="Every call, email, WhatsApp and meeting note in one place."
+        description="Who talked, what was said, what is being discussed now, and what still needs to be covered — with the exact time."
       />
       <CommunicationsView />
     </>

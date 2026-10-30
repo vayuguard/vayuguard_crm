@@ -9,6 +9,7 @@ import {
   Check,
   ExternalLink,
   Kanban,
+  MessageSquarePlus,
   Paperclip,
   UserPlus,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
@@ -40,8 +42,10 @@ import {
 } from "@/components/ui/select";
 import {
   LEAD_STATUS_ORDER,
+  TALK_TYPE_OPTIONS,
   leadStatusLabel,
   priorityLabel,
+  talkTypeLabel,
 } from "@/lib/labels";
 import * as React from "react";
 
@@ -70,6 +74,7 @@ type LeadDetail = {
   campaign?: { id?: string; name?: string } | null;
   assignedToId?: string | null;
   assignedTo?: { id?: string; name?: string | null; email?: string | null } | null;
+  createdBy?: { id?: string; name?: string | null; email?: string | null } | null;
   tags?: { tag?: { name?: string } | null }[] | null;
   attachments?: Attachment[];
   createdAt?: string;
@@ -106,19 +111,29 @@ type Activity = {
   type: string;
   title: string;
   description?: string | null;
+  metadata?: {
+    nextAction?: string | null;
+    dueAt?: string | null;
+  } | null;
   createdAt?: string;
   user?: { name?: string | null; email?: string | null } | null;
 };
 
+type TalkType = (typeof TALK_TYPE_OPTIONS)[number]["value"];
+
 export function LeadDetailView({ leadId }: { leadId: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { can } = usePermissions();
+  const { can, user } = usePermissions();
   const [convertOpen, setConvertOpen] = React.useState(false);
   const [taskOpen, setTaskOpen] = React.useState(false);
   const [dealOpen, setDealOpen] = React.useState(false);
   const [fileName, setFileName] = React.useState("");
   const [fileUrl, setFileUrl] = React.useState("");
+  const [talkType, setTalkType] = React.useState<TalkType>("CALL");
+  const [talkNotes, setTalkNotes] = React.useState("");
+  const [talkNextAction, setTalkNextAction] = React.useState("");
+  const [talkDueAt, setTalkDueAt] = React.useState("");
 
   const leadQuery = useQuery({
     queryKey: ["leads", leadId],
@@ -193,6 +208,60 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       }),
     onSuccess: () => {
       toast.success("Task marked done");
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const logTalkMutation = useMutation({
+    mutationFn: async () => {
+      const lead = leadQuery.data;
+      if (!lead) throw new Error("Lead not loaded");
+      const notes = talkNotes.trim();
+      const nextAction = talkNextAction.trim();
+      const dueAt = talkDueAt || null;
+      const typeLabel = talkTypeLabel(talkType);
+
+      await apiFetch(`/api/leads/${leadId}/activities`, {
+        method: "POST",
+        body: JSON.stringify({
+          type: talkType,
+          title: `${typeLabel} with ${lead.name}`,
+          description: notes,
+          metadata: nextAction
+            ? { nextAction, dueAt }
+            : dueAt
+              ? { dueAt }
+              : null,
+        }),
+      });
+
+      if (nextAction && can("tasks:write")) {
+        await apiFetch("/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: nextAction,
+            dueAt,
+            leadId,
+            assignedToId:
+              lead.assignedToId ?? lead.assignedTo?.id ?? user?.id ?? undefined,
+          }),
+        });
+      }
+    },
+    onSuccess: () => {
+      toast.success(
+        talkNextAction.trim()
+          ? "Talk saved and follow-up task added"
+          : "Talk saved",
+      );
+      setTalkNotes("");
+      setTalkNextAction("");
+      setTalkDueAt("");
+      setTalkType("CALL");
+      queryClient.invalidateQueries({
+        queryKey: ["leads", leadId, "activities"],
+      });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -301,6 +370,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <OwnerBadge person={lead.assignedTo} />
+          {lead.createdBy?.name || lead.createdBy?.email ? (
+            <OwnerBadge person={lead.createdBy} label="Created by" />
+          ) : null}
           <Badge variant="secondary">{leadStatusLabel(lead.status)}</Badge>
           {lead.priority ? (
             <Badge variant="outline">{priorityLabel(lead.priority)} priority</Badge>
@@ -392,7 +464,82 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <div className="space-y-4 lg:col-span-2">
+        {can("leads:write") ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <MessageSquarePlus className="size-4 text-primary" />
+                Log talk
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Write what you discussed with the client. The time is saved
+                automatically.
+              </p>
+              <div className="space-y-1.5">
+                <Label>How did you talk?</Label>
+                <Select
+                  value={talkType}
+                  items={TALK_TYPE_OPTIONS.map((o) => ({
+                    value: o.value,
+                    label: o.label,
+                  }))}
+                  onValueChange={(v) =>
+                    setTalkType((v as TalkType) || "CALL")
+                  }
+                >
+                  <SelectTrigger className="w-full sm:w-[200px]">
+                    <SelectValue placeholder="How you talked" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TALK_TYPE_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>What did you talk about?</Label>
+                <Textarea
+                  value={talkNotes}
+                  onChange={(e) => setTalkNotes(e.target.value)}
+                  placeholder="They asked for a quote on 5 units. Price is okay. Waiting for approval."
+                  rows={3}
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>What do we have to do next? (optional)</Label>
+                  <Input
+                    value={talkNextAction}
+                    onChange={(e) => setTalkNextAction(e.target.value)}
+                    placeholder="Send quote tomorrow"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>When? (optional)</Label>
+                  <Input
+                    type="date"
+                    value={talkDueAt}
+                    onChange={(e) => setTalkDueAt(e.target.value)}
+                  />
+                </div>
+              </div>
+              <Button
+                disabled={!talkNotes.trim() || logTalkMutation.isPending}
+                onClick={() => logTalkMutation.mutate()}
+              >
+                {logTalkMutation.isPending ? "Saving…" : "Save talk"}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <Card>
           <CardHeader>
             <CardTitle className="text-sm font-semibold">Details</CardTitle>
           </CardHeader>
@@ -423,7 +570,13 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               label="Handled by"
               value={lead.assignedTo?.name ?? lead.assignedTo?.email ?? "Nobody yet"}
             />
-            <Field label="Created" value={formatDate(lead.createdAt)} />
+            <Field
+              label="Created by"
+              value={
+                lead.createdBy?.name ?? lead.createdBy?.email ?? "—"
+              }
+            />
+            <Field label="Created on" value={formatDate(lead.createdAt)} />
             {tagNames.length ? (
               <div className="sm:col-span-2">
                 <p className="text-xs text-muted-foreground">Tags</p>
@@ -447,6 +600,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
             </>
           ) : null}
         </Card>
+        </div>
 
         <div className="space-y-4">
           {can("tasks:read") || can("deals:read") ? (
@@ -521,32 +675,54 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <LoadingSkeleton rows={4} />
               ) : activities.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No activities yet.
+                  No talks or updates yet. Use “Log talk” to record a call or
+                  visit.
                 </p>
               ) : (
                 <ol className="relative space-y-4 border-l border-border pl-4">
-                  {activities.map((a) => (
-                    <li key={a.id} className="relative">
-                      <span className="absolute -left-[1.28rem] top-1 size-2.5 rounded-full bg-primary" />
-                      <p className="text-sm font-medium">{a.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {a.type}
-                        {a.user?.name ? ` · ${a.user.name}` : ""}
-                        {" · "}
-                        {formatDate(a.createdAt, {
-                          day: "2-digit",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </p>
-                      {a.description ? (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {a.description}
+                  {activities.map((a) => {
+                    const who =
+                      a.user?.name?.trim() || a.user?.email || null;
+                    const when = formatDate(a.createdAt, {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    });
+                    const nextAction =
+                      a.metadata &&
+                      typeof a.metadata === "object" &&
+                      "nextAction" in a.metadata
+                        ? String(a.metadata.nextAction ?? "").trim()
+                        : "";
+                    return (
+                      <li key={a.id} className="relative">
+                        <span className="absolute -left-[1.28rem] top-1 size-2.5 rounded-full bg-primary" />
+                        <p className="text-sm font-medium">
+                          {a.title || talkTypeLabel(a.type)}
                         </p>
-                      ) : null}
-                    </li>
-                  ))}
+                        <p className="text-xs text-muted-foreground">
+                          {talkTypeLabel(a.type)}
+                          {" · "}
+                          {when}
+                          {who ? ` · by ${who}` : ""}
+                        </p>
+                        {a.description ? (
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/90">
+                            {a.description}
+                          </p>
+                        ) : null}
+                        {nextAction ? (
+                          <p className="mt-1 text-xs font-medium text-primary">
+                            Next: {nextAction}
+                            {a.metadata?.dueAt
+                              ? ` · by ${formatDate(a.metadata.dueAt)}`
+                              : ""}
+                          </p>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </CardContent>

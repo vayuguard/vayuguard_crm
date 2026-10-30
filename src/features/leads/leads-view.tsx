@@ -73,6 +73,7 @@ export type Lead = {
   campaignId?: string | null;
   assignedToId?: string | null;
   assignedTo?: { name?: string | null; email?: string | null } | null;
+  createdBy?: { name?: string | null; email?: string | null } | null;
   notes?: string | null;
   estimatedDealValue?: number | string | null;
   expectedClosingDate?: string | null;
@@ -424,6 +425,17 @@ export function LeadsView() {
       id: "owner",
       header: "Handled by",
       cell: (row) => <OwnerBadge person={row.assignedTo} compact />,
+    },
+    {
+      id: "createdBy",
+      header: "Created by",
+      cell: (row) => (
+        <span className="text-sm text-muted-foreground">
+          {row.createdBy?.name?.trim() ||
+            row.createdBy?.email ||
+            "—"}
+        </span>
+      ),
     },
     {
       id: "priority",

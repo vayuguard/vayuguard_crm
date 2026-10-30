@@ -80,6 +80,7 @@ type AssignmentEvent = {
 type Task = {
   id: string;
   title: string;
+  description?: string | null;
   status?: string;
   priority?: string;
   dueAt?: string | null;
@@ -87,6 +88,8 @@ type Task = {
   type?: string | null;
   assignedToId?: string | null;
   assignedTo?: UserLite | null;
+  createdBy?: UserLite | null;
+  createdAt?: string;
   recurrence?: {
     pattern?: string;
     interval?: number;
@@ -104,6 +107,7 @@ type AssigneeOption = {
 
 type TaskFormValues = {
   title: string;
+  description: string;
   type: (typeof TASK_TYPES)[number];
   status: (typeof TASK_STATUSES)[number];
   priority: (typeof TASK_PRIORITIES)[number];
@@ -133,6 +137,7 @@ type TodoList = {
 
 const emptyForm: TaskFormValues = {
   title: "",
+  description: "",
   type: "TASK",
   status: "TODO",
   priority: "MEDIUM",
@@ -193,6 +198,7 @@ export function TasksView() {
     mutationFn: async (values: TaskFormValues) => {
       const payload: Record<string, unknown> = {
         title: values.title,
+        description: values.description.trim() || null,
         type: values.type,
         status: values.status,
         priority: values.priority,
@@ -293,6 +299,7 @@ export function TasksView() {
     setEditing(task);
     setForm({
       title: task.title,
+      description: task.description ?? "",
       type: (task.type as TaskFormValues["type"]) || "TASK",
       status: (task.status as TaskFormValues["status"]) || "TODO",
       priority: (task.priority as TaskFormValues["priority"]) || "MEDIUM",
@@ -322,6 +329,7 @@ export function TasksView() {
         setEditing(detail);
         setForm((f) => ({
           ...f,
+          description: detail.description ?? f.description,
           assignedToId: detail.assignedToId ?? detail.assignedTo?.id ?? "",
         }));
       }
@@ -362,6 +370,11 @@ export function TasksView() {
         <div>
           <p className="font-medium">{r.title}</p>
           <p className="text-xs text-muted-foreground">{r.type ?? "—"}</p>
+          {r.description ? (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+              {r.description}
+            </p>
+          ) : null}
         </div>
       ),
     },
@@ -378,8 +391,17 @@ export function TasksView() {
     },
     {
       id: "assignee",
-      header: "Handled by",
-      cell: (r) => <OwnerBadge person={r.assignedTo} compact />,
+      header: "Assigned to",
+      cell: (r) => <OwnerBadge person={r.assignedTo} label="Assigned to" compact />,
+    },
+    {
+      id: "createdBy",
+      header: "Created by",
+      cell: (r) => (
+        <span className="text-sm text-muted-foreground">
+          {r.createdBy?.name?.trim() || r.createdBy?.email || "—"}
+        </span>
+      ),
     },
     {
       id: "due",
@@ -545,6 +567,26 @@ export function TasksView() {
                 required
               />
             </Field>
+            {editing?.createdBy ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <OwnerBadge person={editing.createdBy} label="Created by" />
+                {editing.createdAt ? (
+                  <span className="text-xs text-muted-foreground">
+                    {formatTimestamp(editing.createdAt)}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <Field label="Note (optional)">
+              <Textarea
+                rows={3}
+                value={form.description}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, description: e.target.value }))
+                }
+                placeholder="Details about this task, what to say to the client…"
+              />
+            </Field>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Type">
                 <Select
@@ -624,6 +666,15 @@ export function TasksView() {
               <Field label="Assign to">
                 <Select
                   value={form.assignedToId || "__none__"}
+                  items={[
+                    { value: "__none__", label: "Nobody yet" },
+                    ...(assigneesQuery.data ?? []).map((u) => ({
+                      value: u.id,
+                      label:
+                        (u.name?.trim() || u.email || u.id) +
+                        (u.role?.name ? ` · ${u.role.name}` : ""),
+                    })),
+                  ]}
                   onValueChange={(v) =>
                     setForm((f) => ({
                       ...f,
@@ -632,13 +683,13 @@ export function TasksView() {
                   }
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Unassigned" />
+                    <SelectValue placeholder="Who should do this?" />
                   </SelectTrigger>
                   <SelectContent
                     alignItemWithTrigger={false}
                     className="z-[200]"
                   >
-                    <SelectItem value="__none__">Unassigned</SelectItem>
+                    <SelectItem value="__none__">Nobody yet</SelectItem>
                     {assigneesQuery.isLoading ? (
                       <SelectItem value="__loading__" disabled>
                         Loading people…
@@ -655,7 +706,7 @@ export function TasksView() {
               </Field>
             </div>
 
-            <Field label="Assignment note (optional)">
+            <Field label="Note for the person you assign (optional)">
               <Textarea
                 rows={2}
                 value={form.assignmentNote}
@@ -665,8 +716,7 @@ export function TasksView() {
                 placeholder="e.g. Please call the client by Friday and share update…"
               />
               <p className="text-[11px] text-muted-foreground">
-                Saved in the assignment history with who assigned whom and the
-                timestamp.
+                Kept in history with who assigned whom and the exact time.
               </p>
             </Field>
 
@@ -917,12 +967,22 @@ function TaskCard({
         <p className="text-xs text-muted-foreground">
           {task.type ?? "TASK"} · {task.priority ?? "MEDIUM"}
         </p>
+        {task.description ? (
+          <p className="line-clamp-2 text-xs text-muted-foreground">
+            {task.description}
+          </p>
+        ) : null}
         {task.dueAt || task.dueDate ? (
           <p className="text-xs text-muted-foreground">
             {formatDate(task.dueAt ?? task.dueDate)}
           </p>
         ) : null}
-        <OwnerBadge person={task.assignedTo} compact />
+        <div className="flex flex-wrap gap-1">
+          <OwnerBadge person={task.assignedTo} compact />
+          {task.createdBy ? (
+            <OwnerBadge person={task.createdBy} label="Created by" compact />
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   );
