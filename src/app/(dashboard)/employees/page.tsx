@@ -9,7 +9,7 @@ export default function EmployeesPage() {
     <>
       <PageHeader
         title="Employees"
-        description="Team members and role assignments."
+        description="Set who reports to whom. A manager can see their team's leads, deals, tasks and calendar."
       />
       <EmployeesView />
     </>

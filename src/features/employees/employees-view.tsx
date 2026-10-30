@@ -254,8 +254,111 @@ export function EmployeesView() {
   const employees = listQuery.data ?? [];
   const detail = detailQuery.data;
 
+  const managersWithTeam = employees
+    .filter((e) => (e.reportCount ?? 0) > 0)
+    .sort((a, b) => (b.reportCount ?? 0) - (a.reportCount ?? 0));
+  const unassignedReports = employees.filter((e) => !e.manager?.id);
+  const peopleByManager = new Map<string, Employee[]>();
+  for (const e of employees) {
+    const mid = e.manager?.id;
+    if (!mid) continue;
+    const list = peopleByManager.get(mid) ?? [];
+    list.push(e);
+    peopleByManager.set(mid, list);
+  }
+
   return (
     <div className="space-y-6">
+      {canEditEmployees ? (
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+              <Users className="size-4 text-primary" />
+              Team hierarchy
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Super Admin / Admin: click an employee below, then choose who they
+              report to. That manager can see their team&apos;s leads, deals,
+              tasks and calendar.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {listQuery.isLoading ? (
+              <LoadingSkeleton rows={3} />
+            ) : employees.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No employees yet.</p>
+            ) : (
+              <>
+                {managersWithTeam.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+                    No reporting lines set yet. Open anyone in the list and set
+                    <span className="font-medium text-foreground">
+                      {" "}
+                      Reports to
+                    </span>
+                    .
+                  </p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {managersWithTeam.map((manager) => (
+                      <button
+                        key={manager.id}
+                        type="button"
+                        onClick={() => setSelectedId(manager.id)}
+                        className="rounded-lg border border-border px-3 py-2.5 text-left transition-colors hover:bg-muted"
+                      >
+                        <p className="text-sm font-medium">
+                          {manager.name}
+                          <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                            (manager)
+                          </span>
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {(peopleByManager.get(manager.id) ?? []).map((r) => (
+                            <Badge
+                              key={r.id}
+                              variant="outline"
+                              className="cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedId(r.id);
+                              }}
+                            >
+                              {r.name}
+                            </Badge>
+                          ))}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {unassignedReports.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Not under a manager yet ({unassignedReports.length}) —
+                      click to set Reports to
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {unassignedReports.map((e) => (
+                        <Button
+                          key={e.id}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setSelectedId(e.id)}
+                        >
+                          {e.name}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <Trophy className="size-4 text-primary" />
@@ -370,11 +473,12 @@ export function EmployeesView() {
                 />
               </dl>
 
-              <Section title="Reporting">
+              <Section title="Reporting hierarchy">
                 <div className="space-y-1.5">
                   <p className="text-xs text-muted-foreground">
-                    Reports to — this manager can see {detail.name}&apos;s
-                    leads, deals, tasks and calendar.
+                    Who does {detail.name} report to? That person (and Super
+                    Admin) can see {detail.name}&apos;s leads, deals, tasks and
+                    calendar.
                   </p>
                   {canEditEmployees ? (
                     <Select
