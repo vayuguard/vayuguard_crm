@@ -15,9 +15,7 @@ type SelectLabelContextValue = {
 const SelectLabelContext =
   React.createContext<SelectLabelContextValue | null>(null)
 
-function normalizeItems(
-  items: SelectPrimitive.Root.Props["items"],
-): Map<string, React.ReactNode> {
+function normalizeItems(items: unknown): Map<string, React.ReactNode> {
   const map = new Map<string, React.ReactNode>()
   if (!items) return map
   if (Array.isArray(items)) {
@@ -28,16 +26,18 @@ function normalizeItems(
         "value" in item &&
         "label" in item
       ) {
-        map.set(
-          String((item as SelectItemRecord).value),
-          (item as SelectItemRecord).label,
-        )
+        const row = item as SelectItemRecord
+        map.set(String(row.value), row.label)
       }
     }
     return map
   }
-  for (const [key, label] of Object.entries(items)) {
-    map.set(key, label as React.ReactNode)
+  if (typeof items === "object") {
+    for (const [key, label] of Object.entries(
+      items as Record<string, React.ReactNode>,
+    )) {
+      map.set(key, label)
+    }
   }
   return map
 }
@@ -265,11 +265,11 @@ function SelectScrollDownButton({
   )
 }
 
-function Select({
+function Select<Value = string, Multiple extends boolean | undefined = false>({
   items: itemsProp,
   children,
   ...props
-}: SelectPrimitive.Root.Props) {
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
   const labels = React.useMemo(() => {
     const map = normalizeItems(itemsProp)
     collectItemLabels(children, map)
@@ -296,7 +296,11 @@ function Select({
 
   return (
     <SelectLabelContext.Provider value={ctx}>
-      <SelectPrimitive.Root data-slot="select" items={mergedItems} {...props}>
+      <SelectPrimitive.Root
+        data-slot="select"
+        items={mergedItems}
+        {...props}
+      >
         {children}
       </SelectPrimitive.Root>
     </SelectLabelContext.Provider>

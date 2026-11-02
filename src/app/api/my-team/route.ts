@@ -1,11 +1,10 @@
-import { NextRequest } from "next/server";
 import { prisma } from "@/server/db/client";
 import { ok, fail } from "@/server/api/response";
 import { requireSession } from "@/server/auth/session";
 import { getDirectReportIds } from "@/server/auth/team-scope";
 
 /** People who report to the signed-in user, with a quick workload summary. */
-export async function GET(_request: NextRequest) {
+export async function GET() {
   try {
     const session = await requireSession();
     const reportIds = await getDirectReportIds(session.user.id);

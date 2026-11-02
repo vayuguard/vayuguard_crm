@@ -1,4 +1,3 @@
-import { NextRequest } from "next/server";
 import { prisma } from "@/server/db/client";
 import { ok, fail } from "@/server/api/response";
 import { requireSession } from "@/server/auth/session";
@@ -9,7 +8,7 @@ import { hasPermission } from "@/lib/permissions";
  * Lightweight user list for assignment dropdowns (tasks, leads, deals).
  * Available to anyone who can write tasks/leads/deals — not only employees:read.
  */
-export async function GET(_request: NextRequest) {
+export async function GET() {
   try {
     const session = await requireSession();
     const perms = session.user.permissions ?? [];
