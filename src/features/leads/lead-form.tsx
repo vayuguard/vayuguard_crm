@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { leadStatusLabel, priorityLabel } from "@/lib/labels";
 
 export const leadFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -160,7 +161,7 @@ export function LeadForm({
             <SelectContent>
               {LEAD_STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s}
+                  {leadStatusLabel(s)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -179,7 +180,7 @@ export function LeadForm({
             <SelectContent>
               {LEAD_PRIORITIES.map((p) => (
                 <SelectItem key={p} value={p}>
-                  {p}
+                  {priorityLabel(p)}
                 </SelectItem>
               ))}
             </SelectContent>
