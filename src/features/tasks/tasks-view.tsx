@@ -548,7 +548,7 @@ export function TasksView() {
             <DialogTitle>{editing ? "Edit task" : "Create task"}</DialogTitle>
           </DialogHeader>
           <form
-            className="grid gap-3"
+            className="grid gap-3 pb-1"
             onSubmit={(e) => {
               e.preventDefault();
               if (!form.title.trim()) {
