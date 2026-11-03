@@ -319,6 +319,7 @@ export const CONTACT_EXCEL_HEADERS = [
   "phone",
   "whatsapp",
   "designation",
+  "company",
   "department",
   "departmentSubtype",
   // Link to CRM Customer (Zoho company Contact)
@@ -401,6 +402,7 @@ export async function exportContacts(
     phone: c.phone ?? "",
     whatsapp: c.whatsapp ?? "",
     designation: c.designation ?? "",
+    company: c.company ?? "",
     department: c.department ?? "",
     departmentSubtype: c.departmentSubtype ?? "",
     customerNumber: c.customer?.customerNumber ?? "",
@@ -505,6 +507,8 @@ export async function importContactsFromRows(
         const patch: UpdateContactInput = { name };
         const designation = pickColumn(row, "designation");
         if (designation) patch.designation = designation;
+        const company = pickColumn(row, "company");
+        if (company) patch.company = company;
         if (email) patch.email = email;
         if (phone) patch.phone = phone;
         const whatsapp = pickColumn(row, "whatsapp");
@@ -534,6 +538,7 @@ export async function importContactsFromRows(
           {
             name,
             designation: pickColumn(row, "designation") || null,
+            company: pickColumn(row, "company") || null,
             email,
             phone,
             whatsapp: pickColumn(row, "whatsapp") || null,
