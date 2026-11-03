@@ -68,6 +68,7 @@ type Contact = {
   birthday?: string | null;
   designation?: string | null;
   title?: string | null;
+  company?: string | null;
   department?: string | null;
   departmentSubtype?: string | null;
   relationshipScore?: number | null;
@@ -119,6 +120,7 @@ function interestLabel(score: number | null | undefined): string {
 const contactFormSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
   designation: z.string().optional(),
+  company: z.string().optional(),
   email: z.string().email("Invalid email").optional().or(z.literal("")),
   phone: z.string().optional(),
   whatsapp: z.string().optional(),
@@ -145,6 +147,7 @@ type ContactFormValues = z.infer<typeof contactFormSchema>;
 const emptyForm: ContactFormValues = {
   name: "",
   designation: "",
+  company: "",
   email: "",
   phone: "",
   whatsapp: "",
@@ -167,6 +170,7 @@ function toPayload(values: ContactFormValues) {
   return {
     name: values.name,
     designation: values.designation || null,
+    company: values.company?.trim() || null,
     email: values.email || null,
     phone: values.phone || null,
     whatsapp: values.whatsapp || null,
@@ -220,7 +224,6 @@ function scanToFormValues(
 ): ContactFormValues {
   const customerId = card.company ? matchCustomerId(card.company, customers) : "";
   const noteLines = [
-    !customerId && card.company ? `Company: ${card.company}` : "",
     card.website ? `Website: ${card.website}` : "",
     card.address ? `Address: ${card.address}` : "",
   ].filter(Boolean);
@@ -229,6 +232,7 @@ function scanToFormValues(
     ...emptyForm,
     name: card.name.trim(),
     designation: card.designation,
+    company: card.company?.trim() || "",
     email: card.email,
     phone: card.phone,
     whatsapp: card.whatsapp,
@@ -431,6 +435,7 @@ export function ContactsView() {
         [contact.firstName, contact.lastName].filter(Boolean).join(" ") ??
         "",
       designation: contact.designation ?? contact.title ?? "",
+      company: contact.company ?? contact.customer?.name ?? "",
       email: contact.email ?? "",
       phone: contact.phone ?? "",
       whatsapp: contact.whatsapp ?? "",
@@ -475,7 +480,7 @@ export function ContactsView() {
     {
       id: "company",
       header: "Company",
-      cell: (r) => r.customer?.name ?? "—",
+      cell: (r) => r.customer?.name || r.company || "—",
     },
     { id: "email", header: "Email", cell: (r) => r.email ?? "—" },
     { id: "phone", header: "Phone", cell: (r) => r.phone ?? "—" },
@@ -550,6 +555,7 @@ export function ContactsView() {
               title="Create a customer from this contact"
               onClick={() => {
                 setCompanyName("");
+                setCompanyName(r.company ?? r.customer?.name ?? "");
                 setToCustomer(r);
               }}
             >
@@ -735,8 +741,28 @@ export function ContactsView() {
               <Field label="Birthday">
                 <Input type="date" {...form.register("birthday")} />
               </Field>
+              <Field label="Company name">
+                <Input
+                  {...form.register("company")}
+                  placeholder="Type the company name…"
+                  onBlur={(e) => {
+                    const typed = e.target.value.trim();
+                    if (!typed) return;
+                    const match = matchCustomerId(
+                      typed,
+                      customersQuery.data ?? [],
+                    );
+                    if (match && !form.getValues("customerId")) {
+                      form.setValue("customerId", match);
+                    }
+                  }}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  You can type any company name here.
+                </p>
+              </Field>
               <Field
-                label="Company (customer account)"
+                label="Link to customer (optional)"
                 error={
                   customersQuery.isError
                     ? (customersQuery.error as Error).message
@@ -745,15 +771,21 @@ export function ContactsView() {
               >
                 <Select
                   value={form.watch("customerId") || "__none__"}
-                  onValueChange={(v) =>
-                    form.setValue(
-                      "customerId",
-                      v === "__none__" ? "" : (v ?? ""),
-                    )
-                  }
+                  onValueChange={(v) => {
+                    const id = v === "__none__" ? "" : (v ?? "");
+                    form.setValue("customerId", id);
+                    if (id) {
+                      const customer = (customersQuery.data ?? []).find(
+                        (c) => c.id === id,
+                      );
+                      if (customer?.name && !form.getValues("company")?.trim()) {
+                        form.setValue("company", customer.name);
+                      }
+                    }
+                  }}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Link to a company…" />
+                    <SelectValue placeholder="Optional — pick from customers…" />
                   </SelectTrigger>
                   <SelectContent
                     alignItemWithTrigger={false}
@@ -773,8 +805,7 @@ export function ContactsView() {
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  Optional — company this person belongs to. Create customers
-                  under Customers first if the list is empty.
+                  Only if this person already belongs to a customer in the CRM.
                 </p>
               </Field>
               <Field label="Interest">

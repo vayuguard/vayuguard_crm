@@ -354,6 +354,8 @@ model Contact {
   id                String    @id @default(cuid())
   name              String
   designation       String?
+  /// Free-text company name (typed manually; optional link to Customer below)
+  company           String?
   email             String?
   phone             String?
   whatsapp          String?

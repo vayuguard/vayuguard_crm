@@ -24,6 +24,7 @@ const CONTACT_OWNER_KEYS = ["createdById"] as const;
 export const createContactSchema = z.object({
   name: z.string().trim().min(1).max(200),
   designation: emptyToNull,
+  company: emptyToNull,
   email: optionalEmail,
   phone: emptyToNull,
   whatsapp: emptyToNull,
@@ -109,6 +110,7 @@ function buildWhere(
       {
         OR: [
           { name: { contains: term, mode: "insensitive" } },
+          { company: { contains: term, mode: "insensitive" } },
           { email: { contains: term, mode: "insensitive" } },
           { phone: { contains: term, mode: "insensitive" } },
           { designation: { contains: term, mode: "insensitive" } },
@@ -598,6 +600,7 @@ export async function convertContactToLead(
 
   const company =
     contact.customer?.name ||
+    contact.company ||
     companyFromContactNotes(contact.notes) ||
     null;
 
@@ -664,6 +667,7 @@ export async function convertContactToCustomer(
 
   const companyName =
     options.companyName?.trim() ||
+    contact.company?.trim() ||
     companyFromContactNotes(contact.notes) ||
     contact.name;
 

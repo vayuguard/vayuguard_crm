@@ -156,6 +156,7 @@ export async function globalSearch(
               deletedAt: null,
               OR: [
                 { name: contains(term) },
+                { company: contains(term) },
                 { email: contains(term) },
                 { phone: contains(term) },
               ],
@@ -163,7 +164,13 @@ export async function globalSearch(
             scope,
             ["createdById"],
           ),
-          select: { id: true, name: true, email: true, designation: true },
+          select: {
+            id: true,
+            name: true,
+            company: true,
+            email: true,
+            designation: true,
+          },
           take: limit,
         })
         .then((rows) => {
@@ -172,7 +179,8 @@ export async function globalSearch(
               module: "contacts",
               id: row.id,
               title: row.name,
-              subtitle: row.email ?? row.designation,
+              subtitle:
+                row.company || row.email || row.designation || null,
               href: `/contacts?id=${row.id}`,
             });
           }
